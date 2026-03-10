@@ -1,0 +1,381 @@
+{% extends "base.html" %}
+
+{% block title %}Transcribe - SignaTranslate{% endblock %}
+
+{% block content %}
+<div class="container transcribe-container">
+    <div class="transcribe-header">
+        <h1>MIC Start Recording</h1>
+        <p>Position yourself in good lighting and begin signing</p>
+    </div>
+
+    <div class="transcribe-layout">
+        <!-- Video Preview Area -->
+        <div class="video-section">
+            <div class="video-preview" id="videoPreview">
+                <video id="webcam" autoplay playsinline muted></video>
+                <canvas id="canvas" style="display:none;"></canvas>
+            </div>
+            
+            <div class="controls">
+                <button id="startBtn" class="btn btn-primary">START Start Recording</button>
+                <button id="stopBtn" class="btn btn-secondary" disabled>STOP Stop Recording</button>
+                <button id="clearBtn" class="btn btn-secondary">CLEAR Clear</button>
+            </div>
+        </div>
+
+        <!-- Transcription Output Area -->
+        <div class="output-section">
+            <div class="output-box">
+                <h3>TEXT Live Transcription</h3>
+                <div id="liveTranscription" class="live-transcription">
+                    Signs will appear here as they're detected...
+                </div>
+                
+                <div class="confidence-info">
+                    <span>Confidence: <span id="confidenceScore">0%</span></span>
+                </div>
+            </div>
+
+            <!-- Final Transcript -->
+            <form method="POST" action="{{ url_for('transcribe') }}" class="transcript-form">
+                {{ form.hidden_tag() }}
+                
+                <div class="form-group">
+                    {{ form.title.label(class="form-label") }}
+                    {% if form.title.errors %}
+                        {{ form.title(class="form-control is-invalid", placeholder="Title for this transcription") }}
+                        <div class="invalid-feedback">
+                            {% for error in form.title.errors %}
+                                <span>{{ error }}</span>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        {{ form.title(class="form-control", placeholder="Title for this transcription") }}
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    {{ form.content.label(class="form-label") }}
+                    {% if form.content.errors %}
+                        {{ form.content(class="form-control is-invalid", rows=8, id="finalTranscript", placeholder="Final transcription will appear here") }}
+                        <div class="invalid-feedback">
+                            {% for error in form.content.errors %}
+                                <span>{{ error }}</span>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        {{ form.content(class="form-control", rows=8, id="finalTranscript", placeholder="Final transcription will appear here") }}
+                    {% endif %}
+                </div>
+
+                <div class="form-actions">
+                    {{ form.submit(class="btn btn-success") }}
+                    <a href="{{ url_for('user_dashboard') }}" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+.transcribe-container {
+    padding: 40px 20px;
+}
+
+.transcribe-header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.transcribe-header h1 {
+    font-size: 2.5rem;
+    color: #1f2937;
+    margin-bottom: 10px;
+}
+
+.transcribe-header p {
+    color: #6b7280;
+    font-size: 1.1rem;
+}
+
+.transcribe-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-top: 30px;
+}
+
+.video-section {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+}
+
+.video-preview {
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+#webcam {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.btn {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    min-width: 120px;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+}
+
+.btn-secondary {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: #d1d5db;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.output-section {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+}
+
+.output-box {
+    background: #f9fafb;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.output-box h3 {
+    color: #1f2937;
+    margin-bottom: 15px;
+}
+
+.live-transcription {
+    background: white;
+    padding: 15px;
+    border-radius: 6px;
+    min-height: 100px;
+    border: 2px solid #e5e7eb;
+    color: #6b7280;
+    font-style: italic;
+    margin-bottom: 10px;
+}
+
+.confidence-info {
+    text-align: right;
+    font-size: 0.9rem;
+    color: #6b7280;
+}
+
+#confidenceScore {
+    font-weight: 600;
+    color: #667eea;
+}
+
+.transcript-form {
+    margin-top: 20px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #374151;
+}
+
+.form-control {
+    width: 100%;
+    padding: 10px 15px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-family: inherit;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-control.is-invalid {
+    border-color: #dc2626;
+}
+
+.invalid-feedback {
+    color: #dc2626;
+    font-size: 0.875rem;
+    margin-top: 5px;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.btn-success {
+    background: #10b981;
+    color: white;
+}
+
+.btn-success:hover {
+    background: #059669;
+}
+
+@media (max-width: 1024px) {
+    .transcribe-layout {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+<script>
+// WebRTC and sign detection setup
+let mediaStream = null;
+let isRecording = false;
+let detectionInterval = null;
+let detectedSigns = [];
+
+const videoElement = document.getElementById('webcam');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const clearBtn = document.getElementById('clearBtn');
+const liveTranscription = document.getElementById('liveTranscription');
+const finalTranscript = document.getElementById('finalTranscript');
+const confidenceScore = document.getElementById('confidenceScore');
+
+startBtn.addEventListener('click', startRecording);
+stopBtn.addEventListener('click', stopRecording);
+clearBtn.addEventListener('click', clearTranscription);
+
+async function startRecording() {
+    try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'user' },
+            audio: false 
+        });
+        videoElement.srcObject = mediaStream;
+        
+        isRecording = true;
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        liveTranscription.textContent = '';
+        detectedSigns = [];
+        
+        // Start sign detection loop
+        startSignDetection();
+    } catch (error) {
+        console.error('Error accessing camera:', error);
+        alert('Could not access camera. Please check permissions.');
+    }
+}
+
+function stopRecording() {
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+    }
+    
+    isRecording = false;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    
+    if (detectionInterval) {
+        clearInterval(detectionInterval);
+    }
+    
+    // Compile final transcript
+    compileFinalTranscript();
+}
+
+async function startSignDetection() {
+    detectionInterval = setInterval(async () => {
+        if (!isRecording) return;
+        
+        try {
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = videoElement.videoWidth;
+            canvas.height = videoElement.videoHeight;
+            ctx.drawImage(videoElement, 0, 0);
+            
+            // Send frame to backend for detection
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append('frame', blob);
+                
+                const response = await fetch('/api/transcribe', {
+                    method: 'POST',
+                    body: JSON.stringify({ frame: blob }),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                if (data.detected_sign) {
+                    detectedSigns.push(data.detected_sign);
+                    liveTranscription.textContent = detectedSigns.join(' ');
+                    confidenceScore.textContent = Math.round(data.confidence * 100) + '%';
+                }
+            });
+        } catch (error) {
+            console.error('Error in sign detection:', error);
+        }
+    }, 500); // Check every 500ms
+}
+
+function compileFinalTranscript() {
+    const transcript = detectedSigns.join(' ');
+    finalTranscript.value = transcript;
+}
+
+function clearTranscription() {
+    detectedSigns = [];
+    liveTranscription.textContent = 'Signs will appear here as they\'re detected...';
+    finalTranscript.value = '';
+    confidenceScore.textContent = '0%';
+}
+</script>
+{% endblock %}

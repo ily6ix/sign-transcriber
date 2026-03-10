@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+
+{% block title %}{{ transcript.title }} - SignaTranslate{% endblock %}
+
+{% block content %}
+<div class="container transcript-view-container">
+    <div class="transcript-header">
+        <h1>{{ transcript.title }}</h1>
+        <div class="transcript-meta">
+            <span class="meta-item">DATE {{ transcript.created_at.strftime('%B %d, %Y') }}</span>
+            <span class="meta-item">TIME {{ transcript.created_at.strftime('%H:%M %p') }}</span>
+            {% if transcript.session_duration %}
+                <span class="meta-item">DURATION {{ transcript.session_duration }}s</span>
+            {% endif %}
+            <span class="badge badge-{{ transcript.status }}">{{ transcript.status }}</span>
+        </div>
+    </div>
+
+    <div class="transcript-layout">
+        <!-- Main Content -->
+        <div class="transcript-content">
+            <form method="POST" class="edit-transcript-form">
+                {{ form.hidden_tag() }}
+                
+                <div class="form-group">
+                    {{ form.title.label(class="form-label") }}
+                    {{ form.title(class="form-control") }}
+                </div>
+
+                <div class="form-group">
+                    {{ form.content.label(class="form-label") }}
+                    {{ form.content(class="form-control", rows=15) }}
+                </div>
+
+                <div class="form-actions">
+                    {{ form.submit(class="btn btn-primary", value="Update") }}
+                    <a href="{{ url_for('user_dashboard') }}" class="btn btn-secondary">Back</a>
+                </div>
+            </form>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="transcript-sidebar">
+            <div class="sidebar-box">
+                <h3>Actions</h3>
+                <form method="POST" action="{{ url_for('delete_transcript', transcript_id=transcript.id) }}" style="margin-top: 10px;">
+                    <button type="submit" class="btn btn-danger btn-block" onclick="return confirm('Are you sure you want to delete this transcript?')">
+                        DELETE Delete Transcript
+                    </button>
+                </form>
+            </div>
+
+            {% if transcript.confidence_scores %}
+                <div class="sidebar-box">
+                    <h3>Quality Metrics</h3>
+                    <div class="metric">
+                        <span>Average Confidence:</span>
+                        <strong>{{ (transcript.confidence_scores | sum / transcript.confidence_scores | length * 100) | int }}%</strong>
+                    </div>
+                </div>
+            {% endif %}
+
+            <div class="sidebar-box">
+                <h3>Details</h3>
+                <div class="detail">
+                    <span class="detail-label">User:</span>
+                    <span>{{ transcript.user.full_name }}</span>
+                </div>
+                <div class="detail">
+                    <span class="detail-label">Status:</span>
+                    <span class="badge badge-{{ transcript.status }}">{{ transcript.status }}</span>
+                </div>
+                <div class="detail">
+                    <span class="detail-label">Last Updated:</span>
+                    <span>{{ transcript.updated_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.transcript-view-container {
+    padding: 40px 20px;
+}
+
+.transcript-header {
+    margin-bottom: 40px;
+    border-bottom: 2px solid #e5e7eb;
+    padding-bottom: 20px;
+}
+
+.transcript-header h1 {
+    font-size: 2rem;
+    color: #1f2937;
+    margin-bottom: 15px;
+}
+
+.transcript-meta {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.meta-item {
+    color: #6b7280;
+    font-size: 0.95rem;
+}
+
+.badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.badge-completed {
+    background: #dbeafe;
+    color: #0369a1;
+}
+
+.badge-draft {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+.transcript-layout {
+    display: grid;
+    grid-template-columns: 1fr 350px;
+    gap: 30px;
+}
+
+.transcript-content {
+    background: white;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #374151;
+}
+
+.form-control {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-family: inherit;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    transition: all 0.3s ease;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+}
+
+.btn-secondary {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.btn-secondary:hover {
+    background: #d1d5db;
+}
+
+.btn-danger {
+    background: #ef4444;
+    color: white;
+    width: 100%;
+}
+
+.btn-danger:hover {
+    background: #dc2626;
+}
+
+.btn-block {
+    width: 100%;
+}
+
+.transcript-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.sidebar-box {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+}
+
+.sidebar-box h3 {
+    margin-bottom: 15px;
+    color: #1f2937;
+    font-size: 1.1rem;
+}
+
+.metric {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.metric:last-child {
+    border-bottom: none;
+}
+
+.detail {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.detail:last-child {
+    border-bottom: none;
+}
+
+.detail-label {
+    font-weight: 600;
+    color: #374151;
+}
+
+@media (max-width: 1024px) {
+    .transcript-layout {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}

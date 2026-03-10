@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Language Transcriber - Break Communication Barriers</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="logo">
+                <span class="logo-icon">S</span>
+                <span class="logo-text">SignTranscriber</span>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#how-it-works">How it Works</a></li>
+                <li><a href="#contact">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>Break Communication Barriers with Sign Language Transcription</h1>
+                <p>Real-time translation of sign language to text and speech. Empowering deaf and hard of hearing communities.</p>
+                <div class="cta-buttons">
+                    <a href="{{ url_for('login') }}" class="btn btn-primary">Get Started</a>
+                    <a href="{{ url_for('register') }}" class="btn btn-secondary">Register</a>
+                </div>
+            </div>
+            <div class="hero-visual">
+                <div class="video-placeholder">
+                    <span>CAMERA</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <h2>Key Features</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">DETECT</div>
+                    <h3>Real-Time Detection</h3>
+                    <p>Instantly recognize sign language gestures using advanced computer vision technology.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">TEXT</div>
+                    <h3>Text Conversion</h3>
+                    <p>Automatically convert sign language into written text with high accuracy.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">AUDIO</div>
+                    <h3>Text-to-Speech</h3>
+                    <p>Transform transcribed text into natural-sounding audio output.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">GLOBAL</div>
+                    <h3>Multi-Language Support</h3>
+                    <p>Support for various sign languages and spoken languages worldwide.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">FAST</div>
+                    <h3>Fast & Responsive</h3>
+                    <p>Lightning-quick processing with minimal latency for seamless conversations.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">SECURE</div>
+                    <h3>Privacy Focused</h3>
+                    <p>Your data is processed securely with privacy as our top priority.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section id="how-it-works" class="how-it-works">
+        <div class="container">
+            <h2>How It Works</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h3>Start Your Camera</h3>
+                    <p>Enable camera access and position yourself in good lighting.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h3>Sign in Front of the Camera</h3>
+                    <p>Perform your sign language gestures naturally.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h3>Real-Time Transcription</h3>
+                    <p>Watch as your signs are converted to text instantly.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <h3>Share & Save</h3>
+                    <p>Export transcriptions as text, audio, or share directly.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Call to Action Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>Ready to Bridge Communication Gaps?</h2>
+            <p>Start transcribing sign language today. It's free and easy to use.</p>
+            <a href="{{ url_for('login') }}" class="btn btn-primary btn-large">Launch the App</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer id="contact" class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>SignTranscriber</h4>
+                    <p>Making sign language accessible to all.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Links</h4>
+                    <ul>
+                        <li><a href="#features">Features</a></li>
+                        <li><a href="#how-it-works">How it Works</a></li>
+                        <li><a href="#">Privacy Policy</a></li>
+                        <li><a href="#">Terms of Service</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Contact</h4>
+                    <p>Email: info@signtranscriber.com</p>
+                    <p>Phone: +1 (555) 123-4567</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Follow Us</h4>
+                    <div class="social-links">
+                        <a href="#">Twitter</a>
+                        <a href="#">Facebook</a>
+                        <a href="#">LinkedIn</a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 SignTranscriber. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

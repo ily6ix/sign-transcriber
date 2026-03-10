@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block title %}Create User - SignaTranslate{% endblock %}
+
+{% block content %}
+<div class="container create-user-container">
+    <div class="form-header">
+        <h1>NEW Create New User</h1>
+        <p>Add a new user to the system</p>
+    </div>
+
+    <div class="form-box">
+        <form method="POST" action="{{ url_for('create_user') }}" class="create-form">
+            {{ form.hidden_tag() }}
+            
+            <div class="form-group">
+                {{ form.username.label(class="form-label") }}
+                {% if form.username.errors %}
+                    {{ form.username(class="form-control is-invalid") }}
+                    <div class="invalid-feedback">
+                        {% for error in form.username.errors %}
+                            <p>{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    {{ form.username(class="form-control", placeholder="Enter username") }}
+                {% endif %}
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    {{ form.email.label(class="form-label") }}
+                    {% if form.email.errors %}
+                        {{ form.email(class="form-control is-invalid") }}
+                        <div class="invalid-feedback">
+                            {% for error in form.email.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        {{ form.email(class="form-control", placeholder="Enter email") }}
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    {{ form.full_name.label(class="form-label") }}
+                    {% if form.full_name.errors %}
+                        {{ form.full_name(class="form-control is-invalid") }}
+                        <div class="invalid-feedback">
+                            {% for error in form.full_name.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        {{ form.full_name(class="form-control", placeholder="Enter full name") }}
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    {{ form.password.label(class="form-label") }}
+                    {% if form.password.errors %}
+                        {{ form.password(class="form-control is-invalid") }}
+                        <div class="invalid-feedback">
+                            {% for error in form.password.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        {{ form.password(class="form-control", placeholder="Enter temporary password") }}
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    {{ form.role.label(class="form-label") }}
+                    {{ form.role(class="form-control") }}
+                </div>
+            </div>
+
+            <div class="form-actions">
+                {{ form.submit(class="btn btn-primary") }}
+                <a href="{{ url_for('manage_users') }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.create-user-container {
+    padding: 40px 20px;
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.form-header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.form-header h1 {
+    font-size: 2rem;
+    color: #1f2937;
+    margin-bottom: 8px;
+}
+
+.form-header p {
+    color: #6b7280;
+}
+
+.form-box {
+    background: white;
+    padding: 40px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.form-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #374151;
+}
+
+.form-control {
+    width: 100%;
+    padding: 10px 15px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-control.is-invalid {
+    border-color: #dc2626;
+}
+
+.invalid-feedback {
+    color: #dc2626;
+    font-size: 0.875rem;
+    margin-top: 5px;
+}
+
+.invalid-feedback p {
+    margin: 3px 0;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 30px;
+}
+
+.btn {
+    flex: 1;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    transition: all 0.3s ease;
+    text-align: center;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+}
+
+.btn-secondary {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.btn-secondary:hover {
+    background: #d1d5db;
+}
+
+@media (max-width: 640px) {
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}

@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Transcripts - SignaTranslate{% endblock %}
+
+{% block content %}
+<div class="container manage-container">
+    <div class="section-header">
+        <h1>LIST Manage Transcripts</h1>
+        <div class="filter-buttons">
+            <a href="{{ url_for('manage_transcripts', status='all') }}" class="filter-btn {% if current_status == 'all' %}active{% endif %}">All</a>
+            <a href="{{ url_for('manage_transcripts', status='completed') }}" class="filter-btn {% if current_status == 'completed' %}active{% endif %}">Completed</a>
+            <a href="{{ url_for('manage_transcripts', status='draft') }}" class="filter-btn {% if current_status == 'draft' %}active{% endif %}">Draft</a>
+            <a href="{{ url_for('manage_transcripts', status='flagged') }}" class="filter-btn {% if current_status == 'flagged' %}active{% endif %}">Flagged</a>
+        </div>
+    </div>
+
+    <div class="content-section">
+        {% if transcripts.items %}
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>User</th>
+                        <th>Created</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for transcript in transcripts.items %}
+                        <tr>
+                            <td><strong>{{ transcript.title }}</strong></td>
+                            <td>{{ transcript.user.full_name }}</td>
+                            <td>{{ transcript.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td><span class="badge badge-{{ transcript.status }}">{{ transcript.status }}</span></td>
+                            <td>
+                                {% if transcript.session_duration %}
+                                    {{ transcript.session_duration }}s
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
+                            <td>
+                                <a href="{{ url_for('view_transcript', transcript_id=transcript.id) }}" class="btn-sm btn-view">View</a>
+                                {% if transcript.status != 'flagged' %}
+                                    <form method="POST" action="{{ url_for('flag_transcript', transcript_id=transcript.id) }}" style="display:inline;">
+                                        <button type="submit" class="btn-sm btn-flag">Flag</button>
+                                    </form>
+                                {% endif %}
+                                <form method="POST" action="{{ url_for('admin_delete_transcript', transcript_id=transcript.id) }}" style="display:inline;margin-left:5px;">
+                                    <button type="submit" class="btn-sm btn-delete" onclick="return confirm('Are you sure?')">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <!-- Pagination -->
+            {% if transcripts.pages > 1 %}
+                <div class="pagination">
+                    {% if transcripts.has_prev %}
+                        <a href="{{ url_for('manage_transcripts', page=transcripts.prev_num, status=current_status) }}" class="pagination-link">← Previous</a>
+                    {% endif %}
+                    
+                    <span class="pagination-info">
+                        Page {{ transcripts.page }} of {{ transcripts.pages }}
+                    </span>
+                    
+                    {% if transcripts.has_next %}
+                        <a href="{{ url_for('manage_transcripts', page=transcripts.next_num, status=current_status) }}" class="pagination-link">Next →</a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="empty-state">
+                <p>No transcripts found</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<style>
+.manage-container {
+    padding: 40px 20px;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+
+.section-header h1 {
+    font-size: 2rem;
+    color: #1f2937;
+    width: 100%;
+    margin-bottom: 15px;
+}
+
+.filter-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+.filter-btn {
+    padding: 8px 16px;
+    background: white;
+    color: #667eea;
+    border: 2px solid #667eea;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.filter-btn:hover {
+    background: #f3f4f6;
+}
+
+.filter-btn.active {
+    background: #667eea;
+    color: white;
+}
+
+.content-section {
+    background: white;
+    padding: 25px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    overflow-x: auto;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.admin-table thead {
+    background: #f3f4f6;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.admin-table th {
+    padding: 15px;
+    text-align: left;
+    font-weight: 600;
+    color: #374151;
+}
+
+.admin-table td {
+    padding: 15px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.admin-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+.badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.badge-completed {
+    background: #dbeafe;
+    color: #0369a1;
+}
+
+.badge-draft {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+.badge-flagged {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.btn-sm {
+    display: inline-block;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    text-decoration: none;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    margin-right: 5px;
+}
+
+.btn-view {
+    background: #3b82f6;
+    color: white;
+}
+
+.btn-flag {
+    background: #f59e0b;
+    color: white;
+}
+
+.btn-delete {
+    background: #ef4444;
+    color: white;
+}
+
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    margin-top: 30px;
+}
+
+.pagination-link {
+    padding: 10px 20px;
+    background: #667eea;
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.pagination-link:hover {
+    background: #764ba2;
+}
+
+.pagination-info {
+    color: #6b7280;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #6b7280;
+}
+</style>
+{% endblock %}
