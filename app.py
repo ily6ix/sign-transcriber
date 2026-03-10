@@ -35,7 +35,7 @@ def admin_required(f):
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated or not current_user.is_admin():
             flash('You need administrator privileges to access this page.', 'danger')
-            return redirect(url_for('user.dashboard'))
+            return redirect(url_for('user_dashboard'))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -68,7 +68,7 @@ def index():
 def register():
     """User registration"""
     if current_user.is_authenticated:
-        return redirect(url_for('user.dashboard'))
+        return redirect(url_for('user_dashboard'))
     
     form = RegistrationForm()
     if form.validate_on_submit():
@@ -92,7 +92,7 @@ def register():
 def login():
     """User login"""
     if current_user.is_authenticated:
-        return redirect(url_for('user.dashboard'))
+        return redirect(url_for('user_dashboard'))
     
     form = LoginForm()
     if form.validate_on_submit():
@@ -114,7 +114,7 @@ def login():
         if next_page and next_page.startswith('/'):
             return redirect(next_page)
         
-        return redirect(url_for('user.dashboard' if user.role == 'user' else 'admin.dashboard'))
+        return redirect(url_for('user_dashboard' if user.role == 'user' else 'admin_dashboard'))
     
     return render_template('auth/login.html', form=form)
 
