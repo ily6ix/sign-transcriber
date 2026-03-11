@@ -254,6 +254,7 @@ class SignDetector:
     def _get_hand_shape(self, landmarks: List[Dict]) -> Dict:
         """
         Determine hand shape based on finger positions
+        Improved accuracy with better thresholds and multi-point analysis
         Returns dict with finger states
         """
         shape = {
@@ -268,46 +269,46 @@ class SignDetector:
         }
         
         try:
-            # Check each finger
+            # Improved finger detection with multi-point analysis
+            # Each finger: tip at index*4+4, PIP at index*4+2
             shape['index_up'] = self._is_finger_up(landmarks, 1)
             shape['middle_up'] = self._is_finger_up(landmarks, 2)
             shape['ring_up'] = self._is_finger_up(landmarks, 3)
             shape['pinky_up'] = self._is_finger_up(landmarks, 4)
             
-            # Check thumb
-            thumb_tip = landmarks[4]
-            thumb_ip = landmarks[3]
-            thumb_mcp = landmarks[2]
-            shape['thumb_extended'] = thumb_tip['x'] < thumb_ip['x'] - 0.03
+            # Check thumb with improved detection
+            shape['thumb_extended'] = self._is_thumb_extended(landmarks)
             
-            # Check if fingers are spread
-            index_pos = landmarks[9]
-            middle_pos = landmarks[13]
-            ring_pos = landmarks[17]
-            pinky_pos = landmarks[21] if len(landmarks) > 20 else landmarks[20]
-            
-            spread_dist = [
-                abs(index_pos['x'] - middle_pos['x']),
-                abs(middle_pos['x'] - ring_pos['x']),
-                abs(ring_pos['x'] - pinky_pos['x'])
-            ]
-            shape['fingers_spread'] = sum(spread_dist) > 0.15
-            
-            # Check if fingers are touching
-            fingers_up_count = sum([
-                shape['index_up'],
-                shape['middle_up'],
-                shape['ring_up'],
-                shape['pinky_up']
-            ])
-            
-            if fingers_up_count == 0:
-                shape['closed_fist'] = True
-            
-            # Check if fingers are held close together
-            if not shape['fingers_spread'] and fingers_up_count > 0:
-                shape['fingers_touching'] = True
+            # Check if fingers are spread (distance between finger tips)
+            if shape['index_up'] or shape['middle_up'] or shape['ring_up'] or shape['pinky_up']:
+                index_pos = landmarks[8]  # Index tip
+                middle_pos = landmarks[12]  # Middle tip
+                ring_pos = landmarks[16]  # Ring tip
+                pinky_pos = landmarks[20]  # Pinky tip
                 
+                spread_dist = [
+                    abs(index_pos['x'] - middle_pos['x']),
+                    abs(middle_pos['x'] - ring_pos['x']),
+                    abs(ring_pos['x'] - pinky_pos['x'])
+                ]
+                # Improved threshold for spread detection
+                avg_spread = sum(spread_dist) / len(spread_dist)
+                shape['fingers_spread'] = avg_spread > 0.12
+            
+            # Check for closed fist - all fingers should be down
+            fingers_down = sum([
+                not shape['index_up'],
+                not shape['middle_up'],
+                not shape['ring_up'],
+                not shape['pinky_up']
+            ])
+            shape['closed_fist'] = (fingers_down == 4 and not shape['thumb_extended'])
+            
+            # Check if fingers are touching (very close together)
+            if shape['index_up'] or shape['middle_up'] or shape['ring_up'] or shape['pinky_up']:
+                spread_sum = sum(spread_dist) if len(spread_dist) >= 3 else 0
+                shape['fingers_touching'] = spread_sum < 0.05
+            
         except Exception as e:
             print(f"Error getting hand shape: {e}")
         
@@ -316,6 +317,7 @@ class SignDetector:
     def _get_hand_position(self, landmarks: List[Dict]) -> Dict:
         """
         Determine hand position relative to face and body
+        Improved accuracy with better thresholds and focus area detection
         """
         position = {
             'height': 'middle',  # top, middle, bottom
@@ -324,31 +326,47 @@ class SignDetector:
         }
         
         try:
-            palm_base = landmarks[0]
+            palm_base = landmarks[0]  # Wrist
             
-            # Determine height (0=top, 1=bottom)
-            if palm_base['y'] < 0.33:
+            # Improved height detection with better thresholds
+            if palm_base['y'] < 0.3:
                 position['height'] = 'top'
-            elif palm_base['y'] > 0.66:
+            elif palm_base['y'] > 0.7:
                 position['height'] = 'bottom'
             else:
                 position['height'] = 'middle'
             
-            # Determine side (0=left, 1=right)
-            if palm_base['x'] < 0.33:
+            # Improved side detection with better thresholds
+            if palm_base['x'] < 0.35:
                 position['side'] = 'left'
-            elif palm_base['x'] > 0.66:
+            elif palm_base['x'] > 0.65:
                 position['side'] = 'right'
             else:
                 position['side'] = 'center'
             
-            # Determine distance (z-depth)
-            if palm_base['z'] < -0.1:
+            # Improved distance detection using multiple points
+            # Combine wrist and finger tip positions for better z-depth
+            finger_tips = [landmarks[4], landmarks[8], landmarks[12], landmarks[16], landmarks[20]]
+            avg_z = palm_base['z'] + sum(t['z'] for t in finger_tips) / (len(finger_tips) + 1)
+            
+            # More refined thresholds for depth
+            if avg_z < -0.05:
                 position['distance'] = 'far'
-            elif palm_base['z'] > 0.1:
+            elif avg_z > 0.15:
                 position['distance'] = 'close'
             else:
                 position['distance'] = 'normal'
+            
+            # Additional: detect if hand is near face/body (specific ASL context)
+            # Hand near top-center is typically face location
+            if position['height'] == 'top' and position['side'] == 'center':
+                position['focus_area'] = 'face'
+            elif position['height'] == 'bottom' and position['side'] == 'center':
+                position['focus_area'] = 'chest'
+            elif position['height'] == 'middle' and position['side'] == 'center':
+                position['focus_area'] = 'neutral'
+            else:
+                position['focus_area'] = 'side_space'
                 
         except Exception as e:
             print(f"Error getting hand position: {e}")
@@ -401,9 +419,10 @@ class SignDetector:
     def _match_asl_sign(self, hand_shape: Dict, position: Dict, 
                        palm_facing: str, movement: str, landmarks: List[Dict]) -> str:
         """
-        Match detected hand pose to ASL sign
+        Match detected hand pose to ASL sign with improved accuracy
         Based on hand shape, position, and orientation
         Checks custom trained gestures first, then built-in ASL signs
+        Uses more specific conditions to reduce false positives
         """
         
         # First, try to match against custom trained gestures
@@ -420,129 +439,432 @@ class SignDetector:
             hand_shape['pinky_up']
         ])
         
-        # ASL SIGN CLASSIFICATION LOGIC
-        # ==============================
+        # ASL SIGN CLASSIFICATION LOGIC - IMPROVED ACCURACY
+        # ==================================================
         
-        # HELLO/WAVE - Open hand at side, moving sideways
+        # HELLO/WAVE - Open hand at side/top, fingers spread
+        # More specific: high hand at edge with palm away
         if (fingers_up == 5 and hand_shape['fingers_spread'] and 
-            position['side'] in ['right', 'left'] and position['height'] == 'top'):
+            position['side'] in ['right', 'left'] and 
+            position['height'] in ['top', 'middle'] and
+            palm_facing in ['away', 'down']):
             return 'HELLO'
         
-        # THANK YOU - Open hand, palm up, touching chin/mouth
-        if (fingers_up == 5 and position['height'] in ['middle', 'top'] and
-            palm_facing in ['up', 'toward']):
-            if position['distance'] == 'close':
-                return 'THANK_YOU'
+        # THANK YOU - Open hand, palm up/toward, near mouth/chin
+        # Specific: high position, palm facing up, close distance
+        if (fingers_up == 5 and position['height'] in ['top', 'middle'] and
+            palm_facing in ['up', 'toward'] and position['distance'] == 'close' and
+            hand_shape['fingers_spread']):
+            return 'THANK_YOU'
         
-        # LIKE/LOVE - Thumb and middle finger pinched, hand at chest
+        # LIKE/LOVE - Thumb and middle finger, other fingers down
+        # Specific: exactly middle + thumb up
         if (hand_shape['thumb_extended'] and hand_shape['middle_up'] and
             not hand_shape['index_up'] and not hand_shape['ring_up'] and
-            not hand_shape['pinky_up'] and position['distance'] == 'close'):
+            not hand_shape['pinky_up'] and position['distance'] == 'close' and
+            position['height'] == 'middle'):
             return 'LIKE'
         
-        # YES - Fist with thumb up, nodding motion
+        # YES - Fist with thumb up, middle height
+        # Specific: only thumb extended, closed fist
         if (hand_shape['closed_fist'] and hand_shape['thumb_extended'] and
-            position['height'] in ['middle', 'top']):
+            position['height'] in ['middle', 'bottom'] and
+            not hand_shape['index_up']):
             return 'YES'
         
-        # NO - Index and middle finger pointing up side to side
+        # NO - Index and middle finger pointing up together
+        # Very specific: exactly index + middle only
         if (hand_shape['index_up'] and hand_shape['middle_up'] and
             not hand_shape['ring_up'] and not hand_shape['pinky_up'] and
-            not hand_shape['thumb_extended']):
+            not hand_shape['thumb_extended'] and
+            position['side'] in ['center', 'left']):
             return 'NO'
         
-        # STOP - Open hand, palm facing forward/away
+        # STOP - Open hand, palm facing front/away, middle height
+        # Specific: all fingers up, spread, palm away
         if (fingers_up == 5 and hand_shape['fingers_spread'] and
-            palm_facing in ['away', 'toward'] and position['height'] == 'middle'):
+            palm_facing in ['away', 'down'] and position['height'] == 'middle' and
+            position['distance'] in ['normal', 'far']):
             return 'STOP'
         
-        # PLEASE - Open hand, palm on chest, circular motion
+        # PLEASE - Open hand, palm toward, at chest
+        # Specific: all fingers, palm toward or down, close + chest
         if (fingers_up == 5 and position['distance'] == 'close' and
-            position['height'] in ['middle', 'bottom'] and palm_facing == 'toward'):
+            position['height'] in ['middle', 'bottom'] and 
+            palm_facing in ['toward', 'down'] and
+            hand_shape['fingers_spread']):
             return 'PLEASE'
         
-        # SORRY - Fist, hand at chest with circular motion
-        if (hand_shape['closed_fist'] and position['distance'] == 'close' and
+        # SORRY - Fist at chest with rubbing motion
+        # Specific: closed fist, close distance, middle/top height
+        if (hand_shape['closed_fist'] and not hand_shape['thumb_extended'] and
+            position['distance'] == 'close' and
             position['height'] in ['middle', 'top']):
             return 'SORRY'
         
-        # HELP - Open hand over fist, supporting motion
-        if (fingers_up == 5 and hand_shape['fingers_spread'] and
+        # HELP - Open hand(s), supporting motion
+        # Specific: all fingers up, open hand, mid height
+        if (fingers_up == 5 and not hand_shape['closed_fist'] and
+            hand_shape['fingers_spread'] and
             position['height'] in ['middle', 'bottom']):
             return 'HELP'
         
-        # GOOD - Open hand at chin, moving down
+        # GOOD - Open hand at chin, moving downward
+        # Specific: all fingers, palm down/away, high position, close
         if (fingers_up == 5 and position['height'] in ['top', 'middle'] and
-            palm_facing in ['away', 'down'] and position['distance'] == 'close'):
+            palm_facing in ['away', 'down'] and position['distance'] == 'close' and
+            hand_shape['fingers_spread']):
             return 'GOOD'
         
-        # BAD - Open hand at chin, twisting motion (opposite of good)
+        # BAD - Open hand at chin, palm toward/up
+        # Specific: all fingers, palm toward, high position
         if (fingers_up == 5 and position['height'] in ['top', 'middle'] and
-            palm_facing in ['toward', 'up'] and position['distance'] == 'close'):
+            palm_facing in ['toward', 'up'] and position['distance'] == 'close' and
+            hand_shape['fingers_spread']):
             return 'BAD'
         
-        # SIGN - Index and middle finger pointing up, circular outward motion
+        # SIGN - Peace/victory hand moving in arc
+        # Specific: only index + middle up
         if (hand_shape['index_up'] and hand_shape['middle_up'] and
             not hand_shape['ring_up'] and not hand_shape['pinky_up'] and
-            position['side'] in ['center', 'left']):
+            position['side'] in ['center', 'left'] and
+            not hand_shape['closed_fist']):
             return 'SIGN'
         
-        # UNDERSTAND/KNOW - Index finger pointing at temple
+        # UNDERSTAND/KNOW - Index at temple/forehead
+        # Specific: only index up, very close, high
         if (hand_shape['index_up'] and not hand_shape['middle_up'] and
             not hand_shape['ring_up'] and not hand_shape['pinky_up'] and
-            position['height'] == 'top'):
+            position['height'] == 'top' and position['distance'] == 'close'):
             return 'UNDERSTAND'
         
-        # THINK - Index finger pointing at head
-        if (hand_shape['index_up'] and position['height'] == 'top' and
-            position['distance'] == 'close'):
+        # THINK - Index pointing at head
+        # Specific: index only, close, high, not toward face
+        if (hand_shape['index_up'] and not hand_shape['middle_up'] and
+            position['height'] == 'top' and position['distance'] == 'close' and
+            palm_facing != 'toward'):
             return 'THINK'
         
-        # YOU - Index finger pointing outward
+        # YOU - Index finger pointing outward, away
+        # Specific: only index, pointing away from body
         if (hand_shape['index_up'] and not hand_shape['middle_up'] and
-            position['side'] in ['center', 'right'] and palm_facing in ['away', 'right']):
+            not hand_shape['ring_up'] and not hand_shape['pinky_up'] and
+            position['side'] in ['center', 'right'] and
+            palm_facing in ['away', 'right'] and
+            position['distance'] in ['normal', 'far']):
             return 'YOU'
         
-        # ME/I - Index finger pointing to self
+        # ME/I - Index pointing to self at chest
+        # Specific: index only, very close, lower position
         if (hand_shape['index_up'] and not hand_shape['middle_up'] and
+            not hand_shape['ring_up'] and not hand_shape['pinky_up'] and
             position['distance'] == 'close' and position['height'] in ['middle', 'bottom']):
             return 'ME'
         
-        # WHAT/QUESTION - Index and thumb separated, wiggling motion
+        # WHAT/QUESTION - Index and thumb apart
+        # Specific: index + thumb only, middle height
         if (hand_shape['index_up'] and hand_shape['thumb_extended'] and
-            not hand_shape['middle_up'] and position['height'] == 'middle'):
+            not hand_shape['middle_up'] and not hand_shape['ring_up'] and
+            not hand_shape['pinky_up'] and position['height'] == 'middle'):
             return 'WHAT'
         
-        # WHERE - Index finger wiggling while pointing
-        if (hand_shape['index_up'] and position['height'] in ['middle', 'top'] and
-            palm_facing == 'away'):
+        # WHERE - Index pointing with specific orientation
+        # Specific: index only, middle/top, palm away
+        if (hand_shape['index_up'] and not hand_shape['middle_up'] and
+            position['height'] in ['middle', 'top'] and
+            palm_facing == 'away' and position['distance'] in ['normal', 'far']):
             return 'WHERE'
         
-        # CONTINUE/GO - Both hands open, moving forward
+        # GO - Open hand(s) moving forward/away
+        # Specific: all fingers, palm away/forward, not close
         if (fingers_up == 5 and hand_shape['fingers_spread'] and
-            palm_facing in ['away', 'forward']):
+            palm_facing in ['away'] and position['distance'] in ['normal', 'far']):
             return 'GO'
         
-        # COME - Open hand with fingers pointing inward, pulling motion
-        if (fingers_up == 5 and palm_facing in ['toward', 'left', 'right']):
+        # COME - Open hand with inward-facing palm
+        # Specific: all fingers, palm toward/down, pulling motion implied
+        if (fingers_up == 5 and palm_facing in ['toward', 'down'] and
+            hand_shape['fingers_spread'] and position['distance'] in ['normal', 'close']):
             return 'COME'
         
-        # SMILE/HAPPY - Tracing smile with index fingers at mouth
+        # HAPPY - Smile tracing or thumbs up style
+        # Specific: index only at top, close distance
         if (hand_shape['index_up'] and not hand_shape['middle_up'] and
-            position['height'] == 'top' and position['distance'] == 'close'):
+            not hand_shape['ring_up'] and not hand_shape['pinky_up'] and
+            position['height'] == 'top' and position['distance'] == 'close' and
+            not hand_shape['thumb_extended']):
             return 'HAPPY'
         
-        # DEFAULT: Return detected hand shape
+        # NEW SIGNS - Extended recognition
+        
+        # ROCK - Index and pinky only (horn gesture)
+        if (hand_shape['index_up'] and hand_shape['pinky_up'] and
+            not hand_shape['middle_up'] and not hand_shape['ring_up'] and
+            not hand_shape['thumb_extended']):
+            return 'ROCK'
+        
+        # CALL_ME - Pinky to ear (phone shape)
+        if (hand_shape['thumb_extended'] and hand_shape['pinky_up'] and
+            not hand_shape['index_up'] and not hand_shape['middle_up'] and
+            not hand_shape['ring_up'] and
+            position['distance'] == 'close' and position['height'] == 'top'):
+            return 'CALL_ME'
+        
+        # LOVE_YOU - Index, pinky, and thumb extended
+        if (hand_shape['index_up'] and hand_shape['pinky_up'] and
+            hand_shape['thumb_extended'] and not hand_shape['middle_up'] and
+            not hand_shape['ring_up']):
+            return 'LOVE_YOU'
+        
+        # THUMBS_UP - Only thumb up
+        if (hand_shape['thumb_extended'] and not hand_shape['index_up'] and
+            not hand_shape['middle_up'] and not hand_shape['ring_up'] and
+            not hand_shape['pinky_up']):
+            return 'THUMBS_UP'
+        
+        # THUMBS_DOWN - Thumb down at middle/bottom
+        if (hand_shape['thumb_extended'] and not hand_shape['index_up'] and
+            not hand_shape['middle_up'] and not hand_shape['ring_up'] and
+            not hand_shape['pinky_up'] and position['height'] in ['middle', 'bottom']):
+            return 'THUMBS_DOWN'
+        
+        # OK - Thumb and index meeting, other fingers up
+        if (hand_shape['thumb_extended'] and hand_shape['index_up'] and
+            hand_shape['middle_up'] and hand_shape['ring_up'] and
+            hand_shape['pinky_up'] and position['distance'] == 'normal'):
+            return 'OK'
+        
+        # WATER - W-hand shape with movement (all fingers spread with specific hand at top)
+        if (fingers_up == 5 and hand_shape['fingers_spread'] and
+            position['height'] == 'top' and position['distance'] == 'close'):
+            return 'WATER'
+        
+        # FIRE - Fingers wiggling up (two hands typically)
+        if (fingers_up == 5 and hand_shape['fingers_spread'] and
+            position['height'] in ['middle', 'top']):
+            return 'FIRE'
+        
+        # FRIEND - Index fingers locked together
+        if (hand_shape['index_up'] and not hand_shape['middle_up'] and
+            not hand_shape['ring_up'] and not hand_shape['pinky_up'] and
+            position['side'] == 'center'):
+            return 'FRIEND'
+        
+        # FAMILY - F-hand + C-hand motion
+        if (fingers_up == 5 and hand_shape['thumb_extended'] and
+            position['height'] == 'middle'):
+            return 'FAMILY'
+        
+        # MAN - Index and thumb forming L shape, close to forehead
+        if (hand_shape['index_up'] and hand_shape['thumb_extended'] and
+            not hand_shape['middle_up'] and not hand_shape['ring_up'] and
+            not hand_shape['pinky_up'] and
+            position['height'] == 'top' and position['distance'] == 'close'):
+            return 'MAN'
+        
+        # WOMAN - Similar to MAN but at different position
+        if (hand_shape['index_up'] and hand_shape['thumb_extended'] and
+            position['height'] in ['middle', 'bottom'] and
+            position['distance'] == 'close'):
+            return 'WOMAN'
+        
+        # DOG - Snapping motion, index and middle
+        if (hand_shape['index_up'] and hand_shape['middle_up'] and
+            not hand_shape['ring_up'] and not hand_shape['pinky_up'] and
+            position['side'] == 'right'):
+            return 'DOG'
+        
+        # CAT - Two fingers at sides of head (index and thumb)
+        if (hand_shape['thumb_extended'] and hand_shape['index_up'] and
+            not hand_shape['middle_up'] and not hand_shape['ring_up'] and
+            not hand_shape['pinky_up'] and
+            position['height'] == 'top' and position['distance'] == 'close'):
+            return 'CAT'
+        
+        # HOUSE - Roof shape (hands together forming triangle)
+        if (fingers_up == 5 and hand_shape['fingers_spread'] and
+            position['distance'] == 'normal' and
+            position['height'] in ['middle', 'top']):
+            return 'HOUSE'
+        
+        # SCHOOL - Two hands clapping motion
+        if (hand_shape['fingers_spread'] and fingers_up == 5 and
+            position['height'] == 'middle' and position['distance'] == 'normal'):
+            return 'SCHOOL'
+        
+        # WORK - Fist hitting palm
+        if (hand_shape['closed_fist'] and not hand_shape['thumb_extended'] and
+            position['height'] == 'middle' and position['distance'] == 'normal'):
+            return 'WORK'
+        
+        # PLAY - Pinky and thumb extended (Y-hand)
+        if (hand_shape['thumb_extended'] and hand_shape['pinky_up'] and
+            not hand_shape['index_up'] and not hand_shape['middle_up'] and
+            not hand_shape['ring_up']):
+            return 'PLAY'
+        
+        # SLEEP - Hand at side of face/cheek, open
+        if (fingers_up == 5 and position['height'] == 'top' and
+            position['distance'] == 'close' and
+            position['side'] in ['left', 'right']):
+            return 'SLEEP'
+        
+        # EAT - Hand at mouth with fingers together
+        if (fingers_up == 5 and position['height'] == 'top' and
+            position['distance'] == 'close' and hand_shape['fingers_touching']):
+            return 'EAT'
+        
+        # DRINK - C-hand shape at mouth
+        if (hand_shape['thumb_extended'] and position['height'] == 'top' and
+            position['distance'] == 'close'):
+            return 'DRINK'
+        
+        # COFFEE - C-hand holding imaginary cup
+        if (hand_shape['thumb_extended'] and hand_shape['index_up'] and
+            not hand_shape['middle_up'] and position['height'] == 'middle'):
+            return 'COFFEE'
+        
+        # FOOD - Open hand at mouth
+        if (fingers_up == 5 and hand_shape['fingers_spread'] and
+            position['height'] == 'top' and position['distance'] == 'close'):
+            return 'FOOD'
+        
+        # READ - Index and middle pointing at palm
+        if (hand_shape['index_up'] and hand_shape['middle_up'] and
+            not hand_shape['ring_up'] and not hand_shape['pinky_up'] and
+            position['side'] == 'center'):
+            return 'READ'
+        
+        # WRITE - Pinching motion, thumb and index
+        if (hand_shape['thumb_extended'] and hand_shape['index_up'] and
+            not hand_shape['middle_up']):
+            return 'WRITE'
+        
+        # LISTEN - C-hand at ear
+        if (position['height'] == 'top' and position['distance'] == 'close' and
+            position['side'] in ['left', 'right']):
+            return 'LISTEN'
+        
+        # DANCE - Hand moving with fingers spread
+        if (fingers_up == 5 and hand_shape['fingers_spread'] and
+            position['side'] in ['left', 'right']):
+            return 'DANCE'
+        
+        # DIFFERENT - Index fingers crossed
+        if (hand_shape['index_up'] and not hand_shape['middle_up'] and
+            not hand_shape['ring_up'] and not hand_shape['pinky_up'] and
+            position['side'] == 'center'):
+            return 'DIFFERENT'
+        
+        # SAME - Index and middle fingers together, moving
+        if (hand_shape['index_up'] and hand_shape['middle_up'] and
+            not hand_shape['ring_up'] and not hand_shape['pinky_up']):
+            return 'SAME'
+        
+        # MORNING - Open hand at shoulder area, low
+        if (fingers_up == 5 and hand_shape['fingers_spread'] and
+            position['height'] == 'bottom'):
+            return 'MORNING'
+        
+        # NIGHT - Open hand moving down from top
+        if (fingers_up == 5 and position['height'] == 'top'):
+            return 'NIGHT'
+        
+        # TODAY - Hand at middle, index fingers
+        if (hand_shape['index_up'] and hand_shape['middle_up'] and
+            position['height'] == 'middle'):
+            return 'TODAY'
+        
+        # TOMORROW - Index pointing forward/away
+        if (hand_shape['index_up'] and not hand_shape['middle_up'] and
+            palm_facing == 'away' and position['distance'] in ['normal', 'far']):
+            return 'TOMORROW'
+        
+        # YESTERDAY - Index pointing backward
+        if (hand_shape['index_up'] and not hand_shape['middle_up'] and
+            position['side'] == 'left' and position['distance'] in ['normal', 'far']):
+            return 'YESTERDAY'
+        
+        # NOW - Both hands with index and middle up
+        if (hand_shape['index_up'] and hand_shape['middle_up'] and
+            position['height'] == 'middle' and position['distance'] == 'close'):
+            return 'NOW'
+        
+        # LATER - Thumb and index, L-hand shape
+        if (hand_shape['thumb_extended'] and hand_shape['index_up'] and
+            not hand_shape['middle_up']):
+            return 'LATER'
+        
+        # FAST - Hand moving with tension, all fingers
+        if (fingers_up == 5 and position['distance'] in ['normal', 'far']):
+            return 'FAST'
+        
+        # SLOW - Open hand moving slowly (typically detected by motion)
+        if (fingers_up == 5 and hand_shape['fingers_spread'] and
+            position['distance'] in ['close', 'normal']):
+            return 'SLOW'
+        
+        # FUNNY - Index and middle at nose (wrinkling motion)
+        if (hand_shape['index_up'] and hand_shape['middle_up'] and
+            not hand_shape['ring_up'] and position['height'] == 'top'):
+            return 'FUNNY'
+        
+        # ANGRY - Fist at face, intense
+        if (hand_shape['closed_fist'] and position['height'] == 'top' and
+            position['distance'] == 'close'):
+            return 'ANGRY'
+        
+        # SAD - Hands at face moving down
+        if (fingers_up == 5 and position['height'] == 'top' and
+            position['distance'] == 'close'):
+            return 'SAD'
+        
+        # TIRED - Fists at eyes
+        if (hand_shape['closed_fist'] and position['height'] == 'top'):
+            return 'TIRED'
+        
+        # SICK - Middle finger at forehead/mouth
+        if (hand_shape['middle_up'] and not hand_shape['index_up'] and
+            not hand_shape['ring_up'] and not hand_shape['pinky_up']):
+            return 'SICK'
+        
+        # BETTER - Open hand moving upward
+        if (fingers_up == 5 and hand_shape['fingers_spread'] and
+            position['distance'] == 'close'):
+            return 'BETTER'
+        
+        # HAND_CLOSED - Just a fist, very specific
+        if (hand_shape['closed_fist'] and not hand_shape['thumb_extended']):
+            return 'FIST'
+        
+        # Fallback returns for unrecognized but consistent gestures
         if fingers_up == 0:
             return 'FIST'
-        elif fingers_up == 1 and hand_shape['index_up']:
-            return 'POINTING'
-        elif fingers_up == 2 and hand_shape['index_up'] and hand_shape['middle_up']:
-            return 'PEACE'
+        elif fingers_up == 1:
+            if hand_shape['index_up']:
+                return 'POINTING'
+            elif hand_shape['thumb_extended']:
+                return 'THUMBS_UP'
+            else:
+                return 'ONE_FINGER'
+        elif fingers_up == 2:
+            if hand_shape['index_up'] and hand_shape['middle_up']:
+                return 'PEACE'
+            elif hand_shape['index_up'] and hand_shape['ring_up']:
+                return 'TWO_FINGERS'
+            elif hand_shape['index_up'] and hand_shape['pinky_up']:
+                return 'INDEX_PINKY'
+            else:
+                return 'TWO_FINGERS'
+        elif fingers_up == 3:
+            return 'THREE_FINGERS'
+        elif fingers_up == 4:
+            return 'FOUR_FINGERS'
         elif fingers_up == 5:
-            return 'OPEN_HAND'
-        else:
-            return f'GESTURE_{fingers_up}_FINGERS'
+            return 'OPEN_HAND' if hand_shape['fingers_spread'] else 'HAND'
+        
+        # Final unknown fallback - only reached if logic fails
+        return 'UNKNOWN'
     
     def _distance(self, point1: Dict, point2: Dict) -> float:
         """Calculate Euclidean distance between two points"""
@@ -835,6 +1157,208 @@ class SignDetector:
         """
         self.custom_gestures = {}
         print("Cleared all trained gestures")
+    
+    def draw_hand_landmarks(self, frame: np.ndarray, landmarks_list: List[List[Dict]], 
+                           hand_positions: List[Dict] = None, 
+                           detected_signs: List[str] = None) -> np.ndarray:
+        """
+        Draw hand landmarks, skeleton, and tracking lines on frame
+        Shows finger positions and hand connections for accuracy visualization
+        
+        Args:
+            frame: OpenCV image frame
+            landmarks_list: List of hand landmarks (one per hand)
+            hand_positions: List of hand position info (left/right)
+            detected_signs: List of detected signs for labeling
+            
+        Returns:
+            Frame with drawn landmarks and tracking lines
+        """
+        if not landmarks_list:
+            return frame
+        
+        try:
+            h, w, c = frame.shape
+            
+            # MediaPipe hand skeleton connections (21 joints)
+            HAND_CONNECTIONS = [
+                (0, 1), (1, 2), (2, 3), (3, 4),      # Thumb
+                (0, 5), (5, 6), (6, 7), (7, 8),      # Index finger
+                (0, 9), (9, 10), (10, 11), (11, 12), # Middle finger
+                (0, 13), (13, 14), (14, 15), (15, 16),  # Ring finger
+                (0, 17), (17, 18), (18, 19), (19, 20)   # Pinky
+            ]
+            
+            # Colors for different hands
+            colors = [(0, 255, 0), (255, 0, 0)]  # Green for right, Red for left
+            joint_color = (0, 255, 255)  # Yellow for joints
+            
+            # Finger tip indices for labeling
+            finger_names = {8: 'Index', 12: 'Middle', 16: 'Ring', 20: 'Pinky', 4: 'Thumb'}
+            
+            # Draw each hand
+            for hand_idx, landmarks in enumerate(landmarks_list):
+                if not landmarks or len(landmarks) < 21:
+                    continue
+                
+                skeleton_color = colors[hand_idx % len(colors)]
+                hand_label = hand_positions[hand_idx]['label'] if hand_positions and hand_idx < len(hand_positions) else 'Hand'
+                
+                # Draw skeleton connections (bones)
+                for conn in HAND_CONNECTIONS:
+                    start_idx, end_idx = conn
+                    if start_idx < len(landmarks) and end_idx < len(landmarks):
+                        start_pt = landmarks[start_idx]
+                        end_pt = landmarks[end_idx]
+                        
+                        # Convert normalized coordinates to pixel coordinates
+                        start_x = int(start_pt['x'] * w)
+                        start_y = int(start_pt['y'] * h)
+                        end_x = int(end_pt['x'] * w)
+                        end_y = int(end_pt['y'] * h)
+                        
+                        # Draw line (bone)
+                        cv2.line(frame, (start_x, start_y), (end_x, end_y), skeleton_color, 2)
+                
+                # Draw joints (landmarks) as circles
+                for idx, landmark in enumerate(landmarks):
+                    x = int(landmark['x'] * w)
+                    y = int(landmark['y'] * h)
+                    
+                    # Palm is larger, fingers are smaller
+                    radius = 6 if idx == 0 else 4
+                    thickness = -1  # Filled circle
+                    
+                    cv2.circle(frame, (x, y), radius, joint_color, thickness)
+                    
+                    # Label important finger tips
+                    if idx in finger_names:
+                        text = finger_names[idx]
+                        cv2.putText(frame, text, (x + 8, y - 5),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.4, joint_color, 1)
+                
+                # Add hand label at top
+                palm_x = int(landmarks[0]['x'] * w)
+                palm_y = int(landmarks[0]['y'] * h)
+                cv2.putText(frame, f"{hand_label} Hand", (palm_x - 40, palm_y - 30),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, skeleton_color, 2)
+                
+                # Draw detected sign label if available
+                if detected_signs and hand_idx < len(detected_signs):
+                    sign = detected_signs[hand_idx]
+                    cv2.putText(frame, f"Sign: {sign}", (palm_x - 40, palm_y - 10),
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        
+        except Exception as e:
+            print(f"Error drawing hand landmarks: {e}")
+        
+        return frame
+    
+    def draw_finger_tracking_lines(self, frame: np.ndarray, landmarks_list: List[List[Dict]]) -> np.ndarray:
+        """
+        Draw enhanced finger tracking lines showing extension and direction
+        Useful for understanding finger movements and states
+        
+        Args:
+            frame: OpenCV image frame
+            landmarks_list: List of hand landmarks
+            
+        Returns:
+            Frame with finger tracking lines
+        """
+        if not landmarks_list:
+            return frame
+        
+        try:
+            h, w, c = frame.shape
+            
+            for hand_idx, landmarks in enumerate(landmarks_list):
+                if not landmarks or len(landmarks) < 21:
+                    continue
+                
+                # Colors for different fingers
+                finger_colors = {
+                    (2, 3, 4): (255, 0, 0),        # Thumb - Blue
+                    (5, 6, 7, 8): (0, 255, 0),    # Index - Green
+                    (9, 10, 11, 12): (255, 255, 0),  # Middle - Cyan
+                    (13, 14, 15, 16): (255, 0, 255), # Ring - Magenta
+                    (17, 18, 19, 20): (0, 255, 255)  # Pinky - Yellow
+                }
+                
+                # Draw extended lines from base to tip for each finger
+                for joint_indices, color in finger_colors.items():
+                    if joint_indices[0] < len(landmarks) and joint_indices[-1] < len(landmarks):
+                        base = landmarks[joint_indices[0]]
+                        tip = landmarks[joint_indices[-1]]
+                        
+                        base_x = int(base['x'] * w)
+                        base_y = int(base['y'] * h)
+                        tip_x = int(tip['x'] * w)
+                        tip_y = int(tip['y'] * h)
+                        
+                        # Draw extended line showing finger direction
+                        cv2.line(frame, (base_x, base_y), (tip_x, tip_y), color, 2)
+                        
+                        # Extend line beyond tip to show direction
+                        dx = tip_x - base_x
+                        dy = tip_y - base_y
+                        if dx != 0 or dy != 0:
+                            length = np.sqrt(dx*dx + dy*dy)
+                            if length > 0:
+                                # Direction vector
+                                dir_x = dx / length
+                                dir_y = dy / length
+                                # Extend 30 pixels beyond tip
+                                ext_x = int(tip_x + dir_x * 30)
+                                ext_y = int(tip_y + dir_y * 30)
+                                cv2.line(frame, (tip_x, tip_y), (ext_x, ext_y), color, 1)
+                                # Arrow head at end
+                                cv2.circle(frame, (ext_x, ext_y), 3, color, -1)
+        
+        except Exception as e:
+            print(f"Error drawing finger tracking lines: {e}")
+        
+        return frame
+    
+    def add_hand_annotations(self, frame: np.ndarray, detection: Dict) -> np.ndarray:
+        """
+        Add annotations showing detected hand features and confidence
+        
+        Args:
+            frame: OpenCV image frame  
+            detection: Detection result from detect_signs()
+            
+        Returns:
+            Frame with annotations
+        """
+        try:
+            h, w, c = frame.shape
+            y_offset = 30
+            
+            # Display detection summary
+            if detection['has_hands']:
+                cv2.putText(frame, f"Hands Detected: {detection['hands_detected']}", 
+                          (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                y_offset += 30
+                
+                cv2.putText(frame, f"Confidence: {detection['confidence']:.2%}", 
+                          (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                y_offset += 30
+                
+                # Show detected signs
+                if detection['gestures']:
+                    for i, gesture in enumerate(detection['gestures'][:2]):  # Show up to 2 hands
+                        cv2.putText(frame, f"Hand {i+1}: {gesture}", 
+                                  (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                        y_offset += 25
+            else:
+                cv2.putText(frame, "No hands detected", 
+                          (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        
+        except Exception as e:
+            print(f"Error adding annotations: {e}")
+        
+        return frame
 
     def process_video_stream(self, video_source: str = 0) -> List[Dict]:
         """

@@ -1,11 +1,13 @@
 import os
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash
+from io import BytesIO
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from functools import wraps
 from models import db, User, Transcript, AuditLog, SignDataset
 from forms import RegistrationForm, LoginForm, CreateUserForm, EditUserForm, TranscriptForm
 from sign_detector import initialize_detector
+from export_utils import TranscriptExporter, get_export_options
 from config import *
 
 # Initialize Flask app
@@ -221,6 +223,59 @@ def delete_transcript(transcript_id):
     
     flash('Transcript deleted successfully!', 'success')
     return redirect(url_for('user_dashboard'))
+
+
+@app.route('/transcript/<int:transcript_id>/export/<format_type>', methods=['GET'])
+@login_required
+def export_transcript(transcript_id, format_type):
+    """Export transcript in specified format (txt, csv, pdf)"""
+    transcript = Transcript.query.get_or_404(transcript_id)
+    
+    # Check ownership
+    if transcript.user_id != current_user.id and not current_user.is_admin():
+        flash('You do not have permission to export this transcript.', 'danger')
+        return redirect(url_for('user_dashboard'))
+    
+    # Validate format
+    valid_formats = {'txt', 'csv', 'pdf'}
+    if format_type not in valid_formats:
+        flash('Invalid export format.', 'danger')
+        return redirect(url_for('view_transcript', transcript_id=transcript.id))
+    
+    try:
+        exporter = TranscriptExporter()
+        
+        if format_type == 'txt':
+            filename, content = exporter.export_txt(transcript)
+            return send_file(
+                BytesIO(content.encode('utf-8')),
+                mimetype='text/plain',
+                as_attachment=True,
+                download_name=filename
+            )
+        
+        elif format_type == 'csv':
+            filename, content = exporter.export_csv(transcript)
+            return send_file(
+                BytesIO(content),
+                mimetype='text/csv',
+                as_attachment=True,
+                download_name=filename
+            )
+        
+        elif format_type == 'pdf':
+            filename, content = exporter.export_pdf(transcript)
+            return send_file(
+                BytesIO(content),
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=filename
+            )
+    
+    except Exception as e:
+        print(f"Error exporting transcript: {e}")
+        flash(f'Error exporting transcript: {str(e)}', 'danger')
+        return redirect(url_for('view_transcript', transcript_id=transcript.id))
 
 
 # ============================================================================
@@ -452,14 +507,18 @@ def api_transcribe():
                 'detected_sign': detection['detected_sign'],
                 'gestures': detection['gestures'],
                 'confidence': detection['confidence'],
-                'hand_positions': detection['hand_positions']
+                'hand_positions': detection['hand_positions'],
+                'landmarks': detection['landmarks'],
+                'keypoints': detection.get('hand_keypoints', [])
             }), 200
         else:
             return jsonify({
                 'status': 'no_hand',
                 'hands_detected': 0,
                 'detected_sign': None,
-                'confidence': 0.0
+                'confidence': 0.0,
+                'landmarks': [],
+                'keypoints': []
             }), 200
             
     except Exception as e:

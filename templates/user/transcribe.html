@@ -274,13 +274,15 @@
 </style>
 
 <script>
-// Real-time Hand Gesture Detection with MediaPipe
+// Real-time Hand Gesture Detection with MediaPipe + Visual Tracking
 let mediaStream = null;
 let isRecording = false;
 let detectionInterval = null;
 let detectedSigns = [];
 let lastDetectionTime = 0;
 let detectionThrottle = 250; // ms between detections
+let lastLandmarks = null;
+let showTrackingLines = true; // Toggle visibility
 
 const videoElement = document.getElementById('webcam');
 const startBtn = document.getElementById('startBtn');
@@ -289,6 +291,20 @@ const clearBtn = document.getElementById('clearBtn');
 const liveTranscription = document.getElementById('liveTranscription');
 const finalTranscript = document.getElementById('finalTranscript');
 const confidenceScore = document.getElementById('confidenceScore');
+
+// Canvas and rendering elements
+const canvasOverlay = document.createElement('canvas');
+const videoPreview = document.getElementById('videoPreview');
+canvasOverlay.style.position = 'absolute';
+canvasOverlay.style.top = '0';
+canvasOverlay.style.left = '0';
+canvasOverlay.style.cursor = 'crosshair';
+canvasOverlay.style.zIndex = '10';
+canvasOverlay.id = 'trackingCanvas';
+
+// Add canvas overlay to video preview
+videoPreview.style.position = 'relative';
+videoPreview.appendChild(canvasOverlay);
 
 startBtn.addEventListener('click', startRecording);
 stopBtn.addEventListener('click', stopRecording);
@@ -310,12 +326,25 @@ async function startRecording() {
         detectedSigns = [];
         lastDetectionTime = 0;
         
-        // Start sign detection loop
-        startSignDetection();
+        // Wait for video to load then start
+        videoElement.addEventListener('loadedmetadata', () => {
+            setupCanvasOverlay();
+            startSignDetection();
+        }, { once: true });
     } catch (error) {
         console.error('Error accessing camera:', error);
         alert('Could not access camera. Please check permissions.');
     }
+}
+
+function setupCanvasOverlay() {
+    const video = videoElement;
+    canvasOverlay.width = video.videoWidth;
+    canvasOverlay.height = video.videoHeight;
+    
+    // Make canvas match video display size
+    canvasOverlay.style.width = '100%';
+    canvasOverlay.style.height = '100%';
 }
 
 function stopRecording() {
@@ -331,8 +360,207 @@ function stopRecording() {
         clearInterval(detectionInterval);
     }
     
+    // Clear canvas
+    if (canvasOverlay.getContext) {
+        const ctx = canvasOverlay.getContext('2d');
+        ctx.clearRect(0, 0, canvasOverlay.width, canvasOverlay.height);
+    }
+    
     liveTranscription.style.color = '#374151';
     compileFinalTranscript();
+}
+
+// Hand skeleton connections (MediaPipe 21-point hand model)
+const HAND_CONNECTIONS = [
+    [0, 1], [1, 2], [2, 3], [3, 4],        // Thumb
+    [0, 5], [5, 6], [6, 7], [7, 8],        // Index finger
+    [0, 9], [9, 10], [10, 11], [11, 12],   // Middle finger
+    [0, 13], [13, 14], [14, 15], [15, 16], // Ring finger
+    [0, 17], [17, 18], [18, 19], [19, 20]  // Pinky
+];
+
+const FINGER_NAMES = {8: 'Index', 12: 'Middle', 16: 'Ring', 20: 'Pinky', 4: 'Thumb'};
+const HAND_COLORS = {
+    'Right': '#00FF00',  // Green
+    'Left': '#FF0000'    // Red
+};
+const JOINT_COLOR = '#FFFF00';  // Yellow
+const CONNECTION_COLOR = '#00FFFF'; // Cyan
+
+function drawHandLandmarks(ctx, landmarks, hand_position, detected_sign) {
+    if (!landmarks || landmarks.length === 0) return;
+    
+    const w = canvasOverlay.width;
+    const h = canvasOverlay.height;
+    
+    // Get color based on hand (left/right)
+    const posLabel = hand_position ? hand_position.label : 'Right';
+    const lineColor = HAND_COLORS[posLabel] || HAND_COLORS['Right'];
+    
+    // Draw skeleton connections (bones)
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2;
+    
+    for (const [startIdx, endIdx] of HAND_CONNECTIONS) {
+        if (startIdx < landmarks.length && endIdx < landmarks.length) {
+            const start = landmarks[startIdx];
+            const end = landmarks[endIdx];
+            
+            const startX = start.x * w;
+            const startY = start.y * h;
+            const endX = end.x * w;
+            const endY = end.y * h;
+            
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+        }
+    }
+    
+    // Draw joints (landmarks)
+    for (let idx = 0; idx < landmarks.length; idx++) {
+        const landmark = landmarks[idx];
+        const x = landmark.x * w;
+        const y = landmark.y * h;
+        
+        // Palm is larger, fingers are smaller
+        const radius = idx === 0 ? 6 : 4;
+        
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+        ctx.fillStyle = JOINT_COLOR;
+        ctx.fill();
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        // Label important finger tips
+        if (idx in FINGER_NAMES) {
+            ctx.fillStyle = JOINT_COLOR;
+            ctx.font = 'bold 12px Arial';
+            ctx.fillText(FINGER_NAMES[idx], x + 8, y - 8);
+        }
+    }
+    
+    // Add hand position and sign label
+    const palmX = landmarks[0].x * w;
+    const palmY = landmarks[0].y * h;
+    
+    ctx.fillStyle = lineColor;
+    ctx.font = 'bold 14px Arial';
+    ctx.fillText(`${posLabel} Hand`, palmX - 40, palmY - 35);
+    
+    if (detected_sign && detected_sign !== 'unknown') {
+        ctx.fillStyle = '#00FF00';
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText(`${detected_sign}`, palmX - 50, palmY - 10);
+    }
+}
+
+function drawFingerTrackingLines(ctx, landmarks) {
+    if (!landmarks || landmarks.length === 0) return;
+    
+    const w = canvasOverlay.width;
+    const h = canvasOverlay.height;
+    
+    // Colors for different fingers
+    const fingerColors = {
+        thumb: '#0000FF',          // Blue
+        index: '#00FF00',          // Green
+        middle: '#FFFF00',         // Yellow
+        ring: '#FF00FF',           // Magenta
+        pinky: '#00FFFF'           // Cyan
+    };
+    
+    const fingerRanges = {
+        thumb: [2, 3, 4],
+        index: [5, 6, 7, 8],
+        middle: [9, 10, 11, 12],
+        ring: [13, 14, 15, 16],
+        pinky: [17, 18, 19, 20]
+    };
+    
+    // Draw extended lines from base to tip for each finger
+    for (const [fingerName, indices] of Object.entries(fingerRanges)) {
+        if (indices[0] < landmarks.length && indices[indices.length - 1] < landmarks.length) {
+            const baseIdx = indices[0];
+            const tipIdx = indices[indices.length - 1];
+            const base = landmarks[baseIdx];
+            const tip = landmarks[tipIdx];
+            
+            const baseX = base.x * w;
+            const baseY = base.y * h;
+            const tipX = tip.x * w;
+            const tipY = tip.y * h;
+            
+            const color = fingerColors[fingerName];
+            
+            // Draw line showing finger direction
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(baseX, baseY);
+            ctx.lineTo(tipX, tipY);
+            ctx.stroke();
+            
+            // Extend line beyond tip to show direction
+            const dx = tipX - baseX;
+            const dy = tipY - baseY;
+            if (dx !== 0 || dy !== 0) {
+                const length = Math.sqrt(dx * dx + dy * dy);
+                const dirX = dx / length;
+                const dirY = dy / length;
+                const extX = tipX + dirX * 30;
+                const extY = tipY + dirY * 30;
+                
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(tipX, tipY);
+                ctx.lineTo(extX, extY);
+                ctx.stroke();
+                
+                // Arrow head
+                ctx.beginPath();
+                ctx.arc(extX, extY, 3, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.fill();
+            }
+        }
+    }
+}
+
+function drawHandAnnotations(ctx, detection) {
+    const w = canvasOverlay.width;
+    const h = canvasOverlay.height;
+    
+    // Display detection summary
+    let yOffset = 30;
+    ctx.font = 'bold 14px Arial';
+    
+    if (detection.has_hands) {
+        // Hands detected info
+        ctx.fillStyle = '#00FF00';
+        ctx.fillText(`Hands: ${detection.hands_detected}`, 10, yOffset);
+        yOffset += 25;
+        
+        // Confidence score
+        ctx.fillText(`Confidence: ${Math.round(detection.confidence * 100)}%`, 10, yOffset);
+        yOffset += 25;
+        
+        // Detected signs
+        if (detection.gestures && detection.gestures.length > 0) {
+            for (let i = 0; i < Math.min(detection.gestures.length, 2); i++) {
+                ctx.fillText(`Hand ${i + 1}: ${detection.gestures[i]}`, 10, yOffset);
+                yOffset += 25;
+            }
+        }
+    } else {
+        // No hands detected
+        ctx.fillStyle = '#FF0000';
+        ctx.fillText('No hands detected', 10, yOffset);
+    }
 }
 
 async function startSignDetection() {
@@ -366,11 +594,31 @@ async function startSignDetection() {
                     
                     const data = await response.json();
                     
+                    // Clear overlay canvas
+                    const overlayCtx = canvasOverlay.getContext('2d');
+                    overlayCtx.clearRect(0, 0, canvasOverlay.width, canvasOverlay.height);
+                    
                     // Only process if hands were detected
                     if (data.status === 'hand_detected' && data.hands_detected > 0) {
                         // Update confidence score
                         const confPercent = Math.round(data.confidence * 100);
                         confidenceScore.textContent = confPercent + '%';
+                        
+                        // Store landmarks and render them
+                        if (data.landmarks && data.landmarks.length > 0) {
+                            lastLandmarks = data.landmarks;
+                            
+                            // Draw hand tracking visuals
+                            for (let i = 0; i < data.landmarks.length; i++) {
+                                drawHandLandmarks(overlayCtx, data.landmarks[i], 
+                                               data.hand_positions[i] || null, 
+                                               data.gestures[i] || null);
+                                drawFingerTrackingLines(overlayCtx, data.landmarks[i]);
+                            }
+                        }
+                        
+                        // Draw annotations
+                        drawHandAnnotations(overlayCtx, data);
                         
                         // Add detected gesture(s)
                         if (data.detected_sign && data.detected_sign !== 'unknown') {
@@ -392,6 +640,11 @@ async function startSignDetection() {
                             liveTranscription.style.color = '#9ca3af';
                         }
                         confidenceScore.textContent = '0%';
+                        
+                        // Draw "no hands" message
+                        overlayCtx.fillStyle = '#FF0000';
+                        overlayCtx.font = 'bold 16px Arial';
+                        overlayCtx.fillText('No hands detected', 20, 50);
                     }
                 } catch (fetchError) {
                     console.error('Error sending frame for detection:', fetchError);
@@ -415,6 +668,13 @@ function clearTranscription() {
     liveTranscription.style.color = '#9ca3af';
     finalTranscript.value = '';
     confidenceScore.textContent = '0%';
+    lastLandmarks = null;
+    
+    // Clear overlay
+    if (canvasOverlay.getContext) {
+        const ctx = canvasOverlay.getContext('2d');
+        ctx.clearRect(0, 0, canvasOverlay.width, canvasOverlay.height);
+    }
 }
 </script>
 {% endblock %}
