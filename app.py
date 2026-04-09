@@ -4,6 +4,7 @@ from io import BytesIO
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from functools import wraps
+from sqlalchemy import inspect
 from models import db, User, Transcript, AuditLog, SignDataset
 from forms import RegistrationForm, LoginForm, CreateUserForm, EditUserForm, TranscriptForm
 from sign_detector import initialize_detector
@@ -54,6 +55,56 @@ def log_audit(action, target_type, target_id=None, details=None):
         )
         db.session.add(log)
         db.session.commit()
+
+
+# ============================================================================
+# DATABASE HEALTH CHECK & ERROR HANDLERS
+# ============================================================================
+
+@app.route('/health')
+def health_check():
+    """
+    Health check endpoint for monitoring and container orchestration.
+    Returns database connection status and application health.
+    """
+    try:
+        from sqlalchemy import text
+        # Test database connection
+        db.session.execute(text('SELECT 1'))
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'environment': os.getenv('FLASK_ENV', 'development')
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'database': 'disconnected',
+            'error': str(e)
+        }), 503
+
+
+@app.errorhandler(Exception)
+def handle_db_error(error):
+    """
+    Global error handler for database and other exceptions.
+    Helps diagnose MySQL connection issues.
+    """
+    # Log the error
+    import traceback
+    app.logger.error(f"Application error: {error}\n{traceback.format_exc()}")
+    
+    # Check if it's a database connection error
+    error_str = str(error).lower()
+    if any(term in error_str for term in ['mysql', 'connection', 'database', '2006', '1045', '1040']):
+        return render_template('errors/500.html', 
+                             message="Database connection error. Please contact support."), 500
+    
+    # Generic error response
+    return render_template('errors/500.html', 
+                         message="An unexpected error occurred. Please try again."), 500
 
 
 # ============================================================================
@@ -720,10 +771,35 @@ def server_error(error):
 # DATABASE INITIALIZATION
 # ============================================================================
 
-@app.before_request
-def create_tables():
-    """Create database tables if they don't exist"""
-    db.create_all()
+def ensure_database_initialized():
+    """Create missing database tables once at app startup."""
+    with app.app_context():
+        try:
+            # Ensure instance directory exists (for SQLite)
+            instance_path = app.config.get('INSTANCE_PATH', 'instance')
+            os.makedirs(instance_path, exist_ok=True)
+            
+            inspector = inspect(db.engine)
+            required_tables = [
+                User.__tablename__,
+                Transcript.__tablename__,
+                SignDataset.__tablename__,
+                AuditLog.__tablename__,
+            ]
+            existing_tables = inspector.get_table_names()
+            missing_tables = [table for table in required_tables if table not in existing_tables]
+
+            if missing_tables:
+                app.logger.info("Database tables missing, creating: %s", ", ".join(missing_tables))
+                db.create_all()
+                app.logger.info("Database initialization complete")
+            else:
+                app.logger.info("Database already initialized, skipping table creation")
+        except Exception as e:
+            app.logger.error("Database initialization failed: %s", str(e))
+            print(f"⚠️  Database initialization error: {e}")
+            print("   The app may not work correctly until the database is set up.")
+            print("   Run: flask init-db")
 
 
 @app.cli.command()
@@ -773,4 +849,5 @@ def seed_signs():
 
 
 if __name__ == '__main__':
+    ensure_database_initialized()
     app.run(debug=True, host='0.0.0.0', port=5000)

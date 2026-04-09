@@ -1,10 +1,31 @@
 """
 Sign Detection Module - Real-time Hand Gesture Tracking with MediaPipe
 """
-import cv2
-from mediapipe.tasks.python import vision
-from mediapipe.tasks.python.core.base_options import BaseOptions
-from mediapipe.tasks.python.vision.core.image import Image, ImageFormat
+# Configure OpenCV for headless/container environments before import
+import os
+os.environ['OPENCV_VIDEOIO_DEBUG'] = '0'
+os.environ['OPENCV_LOG_LEVEL'] = 'OFF'
+
+try:
+    import cv2
+    # Set numpy-based loading to avoid GUI libraries
+    cv2.ocl.setUseOpenCL(False)
+except ImportError as e:
+    cv2 = None
+except Exception as e:
+    # Catch any other cv2 initialization errors (graphics libs, etc.)
+    print(f"⚠️  Warning: OpenCV not fully available ({e}) - sign detection may be limited")
+    cv2 = None
+
+try:
+    from mediapipe.tasks.python import vision
+    from mediapipe.tasks.python.core.base_options import BaseOptions
+    from mediapipe.tasks.python.vision.core.image import Image, ImageFormat
+    MEDIAPIPE_AVAILABLE = True
+except ImportError:
+    MEDIAPIPE_AVAILABLE = False
+    vision = None
+
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 import time
@@ -29,22 +50,33 @@ class SignDetector:
         """
         self.model_path = model_path
         self.confidence_threshold = confidence_threshold
+        self.hand_detector = None
+        self.is_model_loaded = False
         
-        # Get path to hand landmarker model
-        model_file = self._get_hand_model_path()
+        if not MEDIAPIPE_AVAILABLE:
+            print("⚠️  MediaPipe not available - sign detection will be disabled")
+            return
         
-        # Initialize MediaPipe Hand Landmarker
-        base_options = BaseOptions(model_asset_path=model_file)
-        options = vision.HandLandmarkerOptions(
-            base_options=base_options,
-            running_mode=vision.RunningMode.IMAGE,
-            num_hands=2,
-            min_hand_detection_confidence=confidence_threshold,
-            min_hand_presence_confidence=0.5
-        )
-        self.hand_detector = vision.HandLandmarker.create_from_options(options)
+        try:
+            # Get path to hand landmarker model
+            model_file = self._get_hand_model_path()
+            
+            # Initialize MediaPipe Hand Landmarker
+            base_options = BaseOptions(model_asset_path=model_file)
+            options = vision.HandLandmarkerOptions(
+                base_options=base_options,
+                running_mode=vision.RunningMode.IMAGE,
+                num_hands=2,
+                min_hand_detection_confidence=confidence_threshold,
+                min_hand_presence_confidence=0.5
+            )
+            self.hand_detector = vision.HandLandmarker.create_from_options(options)
+            self.is_model_loaded = True
+        except Exception as e:
+            print(f"⚠️  Error initializing sign detector: {e}")
+            self.hand_detector = None
+            self.is_model_loaded = False
         
-        self.is_model_loaded = True
         self.last_gesture = None
         self.gesture_history = []
         self.gesture_smoothing_frames = 3
@@ -81,14 +113,16 @@ class SignDetector:
             frame_data: Frame as bytes, PIL Image, or numpy array
             
         Returns:
-            OpenCV format frame or None
+            OpenCV format frame (RGB as numpy array) or None
         """
         try:
             if isinstance(frame_data, bytes):
                 pil_image = PILImage.open(BytesIO(frame_data))
-                return cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+                # Convert PIL Image to numpy array (RGB format)
+                return np.array(pil_image)
             elif isinstance(frame_data, PILImage.Image):
-                return cv2.cvtColor(np.array(frame_data), cv2.COLOR_RGB2BGR)
+                # Convert PIL Image to numpy array (RGB format)
+                return np.array(frame_data)
             elif isinstance(frame_data, np.ndarray):
                 if len(frame_data.shape) == 3 and frame_data.shape[2] == 3:
                     return frame_data
@@ -117,14 +151,17 @@ class SignDetector:
             'hand_keypoints': []
         }
         
+        if not self.hand_detector:
+            return result
+        
         try:
             # Convert frame if necessary
             cv_frame = frame if isinstance(frame, np.ndarray) else self.frame_to_cv2(frame)
             if cv_frame is None:
                 return result
             
-            # Convert to RGB for MediaPipe
-            frame_rgb = cv2.cvtColor(cv_frame, cv2.COLOR_BGR2RGB)
+            # frame_to_cv2 already returns RGB format, use directly
+            frame_rgb = cv_frame
             
             # Create MediaPipe Image
             mp_image = Image(image_format=ImageFormat.SRGB, data=frame_rgb)
@@ -1204,50 +1241,51 @@ class SignDetector:
                 skeleton_color = colors[hand_idx % len(colors)]
                 hand_label = hand_positions[hand_idx]['label'] if hand_positions and hand_idx < len(hand_positions) else 'Hand'
                 
-                # Draw skeleton connections (bones)
-                for conn in HAND_CONNECTIONS:
-                    start_idx, end_idx = conn
-                    if start_idx < len(landmarks) and end_idx < len(landmarks):
-                        start_pt = landmarks[start_idx]
-                        end_pt = landmarks[end_idx]
+                # Draw skeleton connections (bones) - skip if cv2 not available
+                if cv2:
+                    for conn in HAND_CONNECTIONS:
+                        start_idx, end_idx = conn
+                        if start_idx < len(landmarks) and end_idx < len(landmarks):
+                            start_pt = landmarks[start_idx]
+                            end_pt = landmarks[end_idx]
+                            
+                            # Convert normalized coordinates to pixel coordinates
+                            start_x = int(start_pt['x'] * w)
+                            start_y = int(start_pt['y'] * h)
+                            end_x = int(end_pt['x'] * w)
+                            end_y = int(end_pt['y'] * h)
+                            
+                            # Draw line (bone)
+                            cv2.line(frame, (start_x, start_y), (end_x, end_y), skeleton_color, 2)
+                    
+                    # Draw joints (landmarks) as circles
+                    for idx, landmark in enumerate(landmarks):
+                        x = int(landmark['x'] * w)
+                        y = int(landmark['y'] * h)
                         
-                        # Convert normalized coordinates to pixel coordinates
-                        start_x = int(start_pt['x'] * w)
-                        start_y = int(start_pt['y'] * h)
-                        end_x = int(end_pt['x'] * w)
-                        end_y = int(end_pt['y'] * h)
+                        # Palm is larger, fingers are smaller
+                        radius = 6 if idx == 0 else 4
+                        thickness = -1  # Filled circle
                         
-                        # Draw line (bone)
-                        cv2.line(frame, (start_x, start_y), (end_x, end_y), skeleton_color, 2)
-                
-                # Draw joints (landmarks) as circles
-                for idx, landmark in enumerate(landmarks):
-                    x = int(landmark['x'] * w)
-                    y = int(landmark['y'] * h)
+                        cv2.circle(frame, (x, y), radius, joint_color, thickness)
+                        
+                        # Label important finger tips
+                        if idx in finger_names:
+                            text = finger_names[idx]
+                            cv2.putText(frame, text, (x + 8, y - 5),
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.4, joint_color, 1)
                     
-                    # Palm is larger, fingers are smaller
-                    radius = 6 if idx == 0 else 4
-                    thickness = -1  # Filled circle
+                    # Add hand label at top
+                    palm_x = int(landmarks[0]['x'] * w)
+                    palm_y = int(landmarks[0]['y'] * h)
+                    cv2.putText(frame, f"{hand_label} Hand", (palm_x - 40, palm_y - 30),
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, skeleton_color, 2)
                     
-                    cv2.circle(frame, (x, y), radius, joint_color, thickness)
-                    
-                    # Label important finger tips
-                    if idx in finger_names:
-                        text = finger_names[idx]
-                        cv2.putText(frame, text, (x + 8, y - 5),
-                                  cv2.FONT_HERSHEY_SIMPLEX, 0.4, joint_color, 1)
-                
-                # Add hand label at top
-                palm_x = int(landmarks[0]['x'] * w)
-                palm_y = int(landmarks[0]['y'] * h)
-                cv2.putText(frame, f"{hand_label} Hand", (palm_x - 40, palm_y - 30),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, skeleton_color, 2)
-                
-                # Draw detected sign label if available
-                if detected_signs and hand_idx < len(detected_signs):
-                    sign = detected_signs[hand_idx]
-                    cv2.putText(frame, f"Sign: {sign}", (palm_x - 40, palm_y - 10),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                    # Draw detected sign label if available
+                    if detected_signs and hand_idx < len(detected_signs):
+                        sign = detected_signs[hand_idx]
+                        cv2.putText(frame, f"Sign: {sign}", (palm_x - 40, palm_y - 10),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         
         except Exception as e:
             print(f"Error drawing hand landmarks: {e}")
@@ -1285,35 +1323,36 @@ class SignDetector:
                     (17, 18, 19, 20): (0, 255, 255)  # Pinky - Yellow
                 }
                 
-                # Draw extended lines from base to tip for each finger
-                for joint_indices, color in finger_colors.items():
-                    if joint_indices[0] < len(landmarks) and joint_indices[-1] < len(landmarks):
-                        base = landmarks[joint_indices[0]]
-                        tip = landmarks[joint_indices[-1]]
-                        
-                        base_x = int(base['x'] * w)
-                        base_y = int(base['y'] * h)
-                        tip_x = int(tip['x'] * w)
-                        tip_y = int(tip['y'] * h)
-                        
-                        # Draw extended line showing finger direction
-                        cv2.line(frame, (base_x, base_y), (tip_x, tip_y), color, 2)
-                        
-                        # Extend line beyond tip to show direction
-                        dx = tip_x - base_x
-                        dy = tip_y - base_y
-                        if dx != 0 or dy != 0:
-                            length = np.sqrt(dx*dx + dy*dy)
-                            if length > 0:
-                                # Direction vector
-                                dir_x = dx / length
-                                dir_y = dy / length
-                                # Extend 30 pixels beyond tip
-                                ext_x = int(tip_x + dir_x * 30)
-                                ext_y = int(tip_y + dir_y * 30)
-                                cv2.line(frame, (tip_x, tip_y), (ext_x, ext_y), color, 1)
-                                # Arrow head at end
-                                cv2.circle(frame, (ext_x, ext_y), 3, color, -1)
+                # Draw extended lines from base to tip for each finger - skip if cv2 not available
+                if cv2:
+                    for joint_indices, color in finger_colors.items():
+                        if joint_indices[0] < len(landmarks) and joint_indices[-1] < len(landmarks):
+                            base = landmarks[joint_indices[0]]
+                            tip = landmarks[joint_indices[-1]]
+                            
+                            base_x = int(base['x'] * w)
+                            base_y = int(base['y'] * h)
+                            tip_x = int(tip['x'] * w)
+                            tip_y = int(tip['y'] * h)
+                            
+                            # Draw extended line showing finger direction
+                            cv2.line(frame, (base_x, base_y), (tip_x, tip_y), color, 2)
+                            
+                            # Extend line beyond tip to show direction
+                            dx = tip_x - base_x
+                            dy = tip_y - base_y
+                            if dx != 0 or dy != 0:
+                                length = np.sqrt(dx*dx + dy*dy)
+                                if length > 0:
+                                    # Direction vector
+                                    dir_x = dx / length
+                                    dir_y = dy / length
+                                    # Extend 30 pixels beyond tip
+                                    ext_x = int(tip_x + dir_x * 30)
+                                    ext_y = int(tip_y + dir_y * 30)
+                                    cv2.line(frame, (tip_x, tip_y), (ext_x, ext_y), color, 1)
+                                    # Arrow head at end
+                                    cv2.circle(frame, (ext_x, ext_y), 3, color, -1)
         
         except Exception as e:
             print(f"Error drawing finger tracking lines: {e}")
@@ -1331,6 +1370,10 @@ class SignDetector:
         Returns:
             Frame with annotations
         """
+        # Skip annotations if cv2 not available (headless environment)
+        if not cv2:
+            return frame
+            
         try:
             h, w, c = frame.shape
             y_offset = 30
