@@ -9,7 +9,8 @@ os.environ['OPENCV_LOG_LEVEL'] = 'OFF'
 try:
     import cv2
     # Set numpy-based loading to avoid GUI libraries
-    cv2.ocl.setUseOpenCL(False)
+    if hasattr(cv2, 'ocl'):
+        cv2.ocl.setUseOpenCL(False)
 except ImportError as e:
     cv2 = None
 except Exception as e:
@@ -22,12 +23,17 @@ try:
     from mediapipe.tasks.python.core.base_options import BaseOptions
     from mediapipe.tasks.python.vision.core.image import Image, ImageFormat
     MEDIAPIPE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     MEDIAPIPE_AVAILABLE = False
     vision = None
+    print(f"⚠️  MediaPipe import error: {e}")
+except Exception as e:
+    MEDIAPIPE_AVAILABLE = False
+    vision = None
+    print(f"⚠️  MediaPipe initialization error: {e}")
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Generator
 import time
 import base64
 from io import BytesIO
@@ -49,6 +55,7 @@ class SignDetector:
             confidence_threshold: Minimum confidence for hand detection (0.0-1.0)
         """
         self.model_path = model_path
+        # Store original threshold for gesture filtering (not MediaPipe detection threshold)
         self.confidence_threshold = confidence_threshold
         self.hand_detector = None
         self.is_model_loaded = False
@@ -62,18 +69,23 @@ class SignDetector:
             model_file = self._get_hand_model_path()
             
             # Initialize MediaPipe Hand Landmarker
+            # Keep MediaPipe detection threshold LOW (0.3) to catch all hands,
+            # then filter results in gesture classification logic
             base_options = BaseOptions(model_asset_path=model_file)
             options = vision.HandLandmarkerOptions(
                 base_options=base_options,
                 running_mode=vision.RunningMode.IMAGE,
                 num_hands=2,
-                min_hand_detection_confidence=confidence_threshold,
+                min_hand_detection_confidence=0.3,  # LOW threshold - let MediaPipe be permissive
                 min_hand_presence_confidence=0.5
             )
             self.hand_detector = vision.HandLandmarker.create_from_options(options)
             self.is_model_loaded = True
+            print(f"✓ Sign detector initialized successfully. Model loaded: {self.is_model_loaded}")
         except Exception as e:
             print(f"⚠️  Error initializing sign detector: {e}")
+            import traceback
+            traceback.print_exc()
             self.hand_detector = None
             self.is_model_loaded = False
         
@@ -118,17 +130,33 @@ class SignDetector:
         try:
             if isinstance(frame_data, bytes):
                 pil_image = PILImage.open(BytesIO(frame_data))
+                # Ensure image is in RGB format (convert from BGR, RGBA, etc.)
+                if pil_image.mode != 'RGB':
+                    pil_image = pil_image.convert('RGB')
                 # Convert PIL Image to numpy array (RGB format)
-                return np.array(pil_image)
+                frame_array = np.array(pil_image)
+                if frame_array.shape[2] != 3 or frame_array.shape[0] == 0 or frame_array.shape[1] == 0:
+                    print(f"⚠️  Invalid frame shape after PIL conversion: {frame_array.shape}")
+                    return None
+                return frame_array
             elif isinstance(frame_data, PILImage.Image):
-                # Convert PIL Image to numpy array (RGB format)
+                # Ensure PIL Image is in RGB format
+                if frame_data.mode != 'RGB':
+                    frame_data = frame_data.convert('RGB')
                 return np.array(frame_data)
             elif isinstance(frame_data, np.ndarray):
                 if len(frame_data.shape) == 3 and frame_data.shape[2] == 3:
-                    return frame_data
+                    # Validate frame is not corrupted (all black usually indicates frame error)
+                    if np.mean(frame_data) > 1:  # At least some pixels should be non-zero
+                        return frame_data
+                    else:
+                        print(f"⚠️  Frame appears to be invalid (all black/zero): {np.mean(frame_data)}")
+                        return None
             return None
         except Exception as e:
             print(f"Error converting frame: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def detect_hand_landmarks(self, frame) -> Dict:
@@ -148,17 +176,24 @@ class SignDetector:
             'gestures': [],
             'confidence': 0.0,
             'has_hands': False,
-            'hand_keypoints': []
+            'hand_keypoints': [],
+            'debug_info': {}  # For troubleshooting
         }
         
         if not self.hand_detector:
+            result['debug_info']['error'] = 'Hand detector not initialized'
+            print(f"⚠️  Hand detector is None. Model loaded: {self.is_model_loaded}")
             return result
         
         try:
             # Convert frame if necessary
             cv_frame = frame if isinstance(frame, np.ndarray) else self.frame_to_cv2(frame)
             if cv_frame is None:
+                result['debug_info']['error'] = 'Frame conversion failed or frame is None'
                 return result
+            
+            result['debug_info']['frame_shape'] = cv_frame.shape
+            result['debug_info']['frame_dtype'] = str(cv_frame.dtype)
             
             # frame_to_cv2 already returns RGB format, use directly
             frame_rgb = cv_frame
@@ -218,6 +253,7 @@ class SignDetector:
             print(f"Error detecting hand landmarks: {e}")
             import traceback
             traceback.print_exc()
+            result['debug_info']['exception'] = str(e)
         
         return result
     
@@ -384,7 +420,7 @@ class SignDetector:
             # Improved distance detection using multiple points
             # Combine wrist and finger tip positions for better z-depth
             finger_tips = [landmarks[4], landmarks[8], landmarks[12], landmarks[16], landmarks[20]]
-            avg_z = palm_base['z'] + sum(t['z'] for t in finger_tips) / (len(finger_tips) + 1)
+            avg_z = (palm_base['z'] + sum(t['z'] for t in finger_tips)) / (len(finger_tips) + 1)
             
             # More refined thresholds for depth
             if avg_z < -0.05:
@@ -478,13 +514,17 @@ class SignDetector:
         
         # ASL SIGN CLASSIFICATION LOGIC - IMPROVED ACCURACY
         # ==================================================
+        # IMPORTANT: Order matters! Earlier conditions can shadow later ones.
+        # More specific conditions with additional constraints should come before generic ones.
         
-        # HELLO/WAVE - Open hand at side/top, fingers spread
-        # More specific: high hand at edge with palm away
+        # HELLO/WAVE - Open hand at side/top, fingers spread, with motion context
+        # More specific: high hand at edge with palm away, NOT close to face
         if (fingers_up == 5 and hand_shape['fingers_spread'] and 
             position['side'] in ['right', 'left'] and 
             position['height'] in ['top', 'middle'] and
-            palm_facing in ['away', 'down']):
+            palm_facing in ['away', 'down'] and
+            position['distance'] in ['normal', 'far'] and
+            position.get('focus_area') != 'face'):  # Not at face = waving motion
             return 'HELLO'
         
         # THANK YOU - Open hand, palm up/toward, near mouth/chin
@@ -944,7 +984,8 @@ class SignDetector:
     def _is_thumb_extended(self, landmarks: List[Dict]) -> bool:
         """
         Check if thumb is extended
-        Thumb is extended when tip is away from palm more than usual
+        Thumb is extended when tip is further from base than typical resting position
+        Uses both distance and y-axis similarity to other fingers check
         """
         try:
             thumb_tip = landmarks[4]
@@ -952,11 +993,13 @@ class SignDetector:
             thumb_mcp = landmarks[2]
             palm = landmarks[0]
             
-            # Thumb is extended if tip is further from palm than MCP
+            # Thumb is extended if tip is further from palm than MCP by significant margin
             thumb_tip_dist = self._distance(thumb_tip, palm)
             thumb_mcp_dist = self._distance(thumb_mcp, palm)
             
-            return thumb_tip_dist > thumb_mcp_dist + 0.02
+            # Use higher threshold (0.08 instead of 0.02) to reduce false positives
+            # Also check that tip-to-palm distance is absolute (> 0.1) to ensure true extension
+            return (thumb_tip_dist > thumb_mcp_dist + 0.08) and (thumb_tip_dist > 0.1)
         except:
             return False
     
@@ -1403,7 +1446,7 @@ class SignDetector:
         
         return frame
 
-    def process_video_stream(self, video_source: str = 0) -> List[Dict]:
+    def process_video_stream(self, video_source: str = 0) -> Generator[Dict, None, None]:
         """
         Process video stream from webcam or file
         Only yields frames with detected hands
