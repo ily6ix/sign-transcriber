@@ -1,6 +1,17 @@
 import os
 from datetime import datetime
 from io import BytesIO
+
+# CRITICAL: Load environment variables FIRST before any config is imported
+import sys
+if os.path.exists('.env'):
+    with open('.env', 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                os.environ[key.strip()] = value.strip()
+
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from functools import wraps
@@ -122,22 +133,25 @@ def register():
     """User registration"""
     if current_user.is_authenticated:
         return redirect(url_for('user_dashboard'))
-    
+
     form = RegistrationForm()
     if form.validate_on_submit():
+        # Allow admin registration - remove the restriction for now
+        selected_role = form.role.data
+
         user = User(
             username=form.username.data,
             email=form.email.data,
             full_name=form.full_name.data,
-            role='user'
+            role=selected_role
         )
         user.set_password(form.password.data)
         db.session.add(user)
         db.session.commit()
-        
+
         flash('Registration successful! Please log in.', 'success')
         return redirect(url_for('login'))
-    
+
     return render_template('auth/register.html', form=form)
 
 
@@ -519,6 +533,46 @@ def analytics():
                          transcripts_count=transcripts_count,
                          transcripts_by_status=transcripts_by_status,
                          top_users=top_users)
+
+
+@app.route('/admin/datasets')
+@login_required
+@admin_required
+def manage_datasets():
+    """View and manage sign language datasets"""
+    page = request.args.get('page', 1, type=int)
+    gesture_filter = request.args.get('gesture_type', 'all')
+    
+    query = SignDataset.query
+    if gesture_filter != 'all':
+        query = query.filter_by(gesture_type=gesture_filter)
+    
+    datasets = query.order_by(SignDataset.sign_name).paginate(page=page, per_page=20)
+    
+    return render_template('admin/manage_datasets.html', datasets=datasets, 
+                         current_gesture=gesture_filter)
+
+
+@app.route('/admin/audit-logs')
+@login_required
+@admin_required
+def audit_logs():
+    """View audit logs for admin activities"""
+    page = request.args.get('page', 1, type=int)
+    action_filter = request.args.get('action', 'all')
+    
+    query = AuditLog.query
+    if action_filter != 'all':
+        query = query.filter_by(action=action_filter)
+    
+    logs = query.order_by(AuditLog.timestamp.desc()).paginate(page=page, per_page=25)
+    
+    # Get unique actions for filter dropdown
+    unique_actions = db.session.query(AuditLog.action).distinct().all()
+    actions = [action[0] for action in unique_actions]
+    
+    return render_template('admin/audit_logs.html', logs=logs, 
+                         current_action=action_filter, actions=actions)
 
 
 # ============================================================================

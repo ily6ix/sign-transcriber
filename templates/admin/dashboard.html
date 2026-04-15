@@ -44,7 +44,10 @@
     <!-- Quick Actions -->
     <div class="quick-actions">
         <a href="{{ url_for('create_user') }}" class="action-btn btn-primary">NEW Create New User</a>
-        <a href="{{ url_for('manage_transcripts') }}" class="action-btn btn-secondary">LIST View All Transcripts</a>
+        <a href="{{ url_for('manage_users') }}" class="action-btn btn-secondary">USERS Manage Users</a>
+        <a href="{{ url_for('manage_transcripts') }}" class="action-btn btn-secondary">TEXT Manage Transcripts</a>
+        <a href="{{ url_for('manage_datasets') }}" class="action-btn btn-secondary">SIGN Manage Datasets</a>
+        <a href="{{ url_for('audit_logs') }}" class="action-btn btn-secondary">LOG View Audit Logs</a>
         <a href="{{ url_for('analytics') }}" class="action-btn btn-secondary">CHART Detailed Analytics</a>
     </div>
 

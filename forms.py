@@ -17,6 +17,10 @@ class RegistrationForm(FlaskForm):
         DataRequired(),
         Length(min=2, max=120)
     ])
+    role = SelectField('Account Type', choices=[
+        ('user', 'Regular User'),
+        ('admin', 'Administrator')
+    ], default='user', validators=[DataRequired()])
     password = PasswordField('Password', validators=[
         DataRequired(),
         Length(min=6, message='Password must be at least 6 characters')

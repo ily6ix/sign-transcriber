@@ -13,31 +13,32 @@ IS_PRODUCTION = ENV == 'production'
 
 def get_database_uri():
     """
-    Get database URI based on environment variables.
+    Get database URI - MANDATORY Railway MySQL when DATABASE_URL is set.
     
-    For Railway MySQL:
-    - Set DATABASE_URL to: mysql+pymysql://user:password@host:port/database
-    - Railway provides this via DATABASE_URL environment variable
-    
-    For Local SQLite:
-    - Default fallback if DATABASE_URL is not set
+    Production Requirement:
+    - DATABASE_URL must be set in environment variables
+    - Only Railway MySQL is supported
+    - No SQLite fallback allowed
     """
     database_url = os.getenv('DATABASE_URL')
     
-    if database_url:
-        # Railway MySQL - Ensure it uses pymysql driver
-        if database_url.startswith('mysql://'):
-            # Convert mysql:// to mysql+pymysql:// if needed
-            database_url = database_url.replace('mysql://', 'mysql+pymysql://', 1)
-        return database_url
+    if not database_url:
+        raise ValueError(
+            "CRITICAL: DATABASE_URL environment variable is not set!\n"
+            "The application REQUIRES Railway MySQL database.\n"
+            "Please set DATABASE_URL in your .env file:\n"
+            "  DATABASE_URL=mysql+pymysql://user:password@host:port/database\n"
+            "This is mandatory for all environments."
+        )
     
-    # Fallback to local SQLite for development
-    # Use absolute path to ensure SQLite finds the database file
-    db_filename = os.getenv('SQLITE_DB_PATH', 'instance/sign.db')
-    db_path = os.path.abspath(db_filename)
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    # SQLite URI format: sqlite:////absolute/path or sqlite:///./relative/path
-    return f'sqlite:///{db_path}'
+    # Railway MySQL - Ensure it uses pymysql driver
+    if database_url.startswith('mysql://'):
+        # Convert mysql:// to mysql+pymysql:// if needed
+        database_url = database_url.replace('mysql://', 'mysql+pymysql://', 1)
+    
+    print(f"✅ Using Railway MySQL Database")
+    print(f"   URL: {database_url.split('@')[0]}@{database_url.split('@')[1] if '@' in database_url else 'railway'}")
+    return database_url
 
 SQLALCHEMY_DATABASE_URI = get_database_uri()
 SQLALCHEMY_TRACK_MODIFICATIONS = False
